@@ -6,6 +6,7 @@ import type { LibraryRepository } from '../data/libraryRepository'
 import { GamePage } from '../pages/GamePage'
 import { LibraryPage } from '../pages/LibraryPage'
 import { SearchPage } from '../pages/SearchPage'
+import { UploadPage } from '../pages/UploadPage'
 import { AppShell } from './AppShell'
 import { LibraryProvider } from './LibraryContext'
 
@@ -22,18 +23,7 @@ export function App({ repository = demoRepository }: AppProps) {
             <Route index element={<LibraryPage />} />
             <Route path="search" element={<SearchPage />} />
             <Route path="game/:gameId" element={<GamePage />} />
-            <Route
-              path="upload"
-              element={
-                <EmptyState
-                  eyebrow="UPLOAD WORKBENCH"
-                  title="上传工作台即将就绪"
-                  description="下一步会在这里解析游戏文件夹、模块名称和动作序列。"
-                  actionLabel="返回游戏书架"
-                  actionTo="/"
-                />
-              }
-            />
+            <Route path="upload" element={<UploadPage />} />
             <Route
               path="settings"
               element={

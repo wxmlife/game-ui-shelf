@@ -261,6 +261,69 @@ h1, h2, h3, .brand-copy strong { font-family: "SF Pro Display", "PingFang SC", s
 .viewer-panel dd { margin: 0; overflow-wrap: anywhere; }
 .viewer-download { margin-top: auto; }
 
+.upload-page { max-width: 1240px; }
+.upload-hero { display: flex; align-items: flex-end; justify-content: space-between; gap: 36px; margin-bottom: 28px; }
+.upload-hero h1 { margin: 0; }
+.upload-rule-card { display: flex; align-items: center; gap: 11px; min-width: 285px; padding: 14px 16px; border: 1px solid rgba(216,255,98,0.2); border-radius: 13px; background: rgba(216,255,98,0.055); color: var(--accent); }
+.upload-rule-card > div { display: grid; gap: 3px; }
+.upload-rule-card strong { color: #f5f7f5; font-size: 11px; }
+.upload-rule-card span { color: var(--muted); font-size: 9px; }
+.naming-guide { display: flex; align-items: center; gap: 12px; margin-bottom: 18px; padding: 12px 15px; border: 1px solid var(--line); border-radius: 11px; background: rgba(255,255,255,0.025); color: var(--muted); font-size: 10px; }
+.naming-guide > span { color: var(--accent); font-weight: 800; }
+.naming-guide code { padding: 5px 8px; border-radius: 6px; background: #080a09; color: #ccd1cd; }
+.naming-guide strong { color: #fff; }
+
+.upload-dropzone { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 17px; min-height: 138px; padding: 28px; border: 1px dashed rgba(216,255,98,0.34); border-radius: 19px; background: linear-gradient(115deg, rgba(216,255,98,0.07), rgba(255,255,255,0.02)); transition: 160ms ease; cursor: pointer; }
+.upload-dropzone:hover, .upload-dropzone.is-dragging { border-color: var(--accent); background: rgba(216,255,98,0.1); transform: translateY(-1px); }
+.upload-dropzone input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.upload-dropzone-icon { display: grid; width: 58px; height: 58px; place-items: center; border-radius: 15px; background: var(--accent); color: var(--accent-ink); box-shadow: 0 0 0 7px rgba(216,255,98,0.06); }
+.upload-dropzone-copy { display: grid; gap: 5px; }
+.upload-dropzone-copy strong { font-size: 15px; }
+.upload-dropzone-copy span, .upload-dropzone-hint { color: var(--muted); font-size: 10px; }
+.upload-dropzone-hint { display: flex; align-items: center; gap: 7px; }
+
+.import-preview { margin-top: 34px; }
+.import-preview-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; margin-bottom: 18px; }
+.import-preview-heading h2 { margin: 0 0 6px; font-size: 27px; }
+.import-preview-heading p:not(.eyebrow) { margin: 0; color: var(--muted); font-size: 11px; }
+.import-counts { display: flex; gap: 8px; }
+.import-counts span { display: inline-flex; align-items: center; gap: 6px; padding: 8px 10px; border-radius: 8px; background: rgba(216,255,98,0.08); color: var(--accent); font-size: 10px; }
+.import-counts .import-counts-warning { background: rgba(255,173,74,0.1); color: #ffbd69; }
+.import-meta-grid { display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 12px; margin-bottom: 14px; padding: 17px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); }
+.import-meta-grid label, .import-field-grid label { display: grid; gap: 6px; }
+.import-meta-grid label > span, .import-field-grid label > span { color: #89908b; font-size: 9px; font-weight: 700; }
+.import-meta-grid input, .import-field-grid input { min-width: 0; width: 100%; height: 36px; padding: 0 10px; border: 1px solid var(--line); border-radius: 8px; outline: 0; background: #0e1210; color: #f2f4f2; font-size: 10px; }
+.import-meta-grid input:focus, .import-field-grid input:focus { border-color: rgba(216,255,98,0.65); box-shadow: 0 0 0 3px rgba(216,255,98,0.07); }
+.import-file-list { display: grid; gap: 10px; }
+.import-file-card { display: grid; grid-template-columns: 86px minmax(0, 1fr) auto; gap: 15px; padding: 13px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); }
+.import-file-thumb { display: grid; overflow: hidden; min-height: 118px; place-items: center; border-radius: 9px; background: #080a09; }
+.import-file-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.import-preview-fallback { color: #59615c; }
+.import-file-fields { min-width: 0; }
+.import-original-name { display: flex; align-items: center; gap: 6px; margin-bottom: 10px; color: #bdc4bf; font-size: 9px; }
+.import-original-name svg { color: var(--accent); }
+.import-field-grid { display: grid; grid-template-columns: 1.25fr 0.8fr 0.8fr 1fr 1.6fr 72px; gap: 9px; }
+.icon-button { display: grid; width: 34px; height: 34px; place-items: center; border: 1px solid var(--line); border-radius: 8px; background: transparent; color: #767e79; }
+.icon-button:hover { border-color: rgba(255,109,109,0.35); color: #ff8585; }
+.rejected-files { margin-top: 13px; overflow: hidden; border: 1px solid rgba(255,173,74,0.2); border-radius: 13px; background: rgba(255,173,74,0.04); }
+.rejected-files h3 { display: flex; align-items: center; gap: 7px; margin: 0; padding: 12px 14px; color: #ffbd69; font-size: 11px; }
+.rejected-files > div { display: grid; grid-template-columns: 1fr 2fr auto; gap: 12px; padding: 10px 14px; border-top: 1px solid rgba(255,255,255,0.06); font-size: 9px; }
+.rejected-files strong { color: #c9a77a; font-weight: 500; }
+.rejected-files button { border: 0; background: transparent; color: #ffbd69; font-size: 9px; }
+.upload-submit-bar { position: sticky; bottom: 18px; z-index: 18; display: flex; align-items: center; justify-content: space-between; gap: 24px; margin-top: 18px; padding: 14px 16px; border: 1px solid rgba(216,255,98,0.2); border-radius: 14px; background: rgba(17,21,19,0.94); box-shadow: 0 18px 50px rgba(0,0,0,0.36); backdrop-filter: blur(18px); }
+.upload-submit-bar > div { display: grid; gap: 3px; }
+.upload-submit-bar strong { font-size: 11px; }
+.upload-submit-bar span { color: var(--muted); font-size: 9px; }
+.primary-button:disabled { opacity: 0.45; cursor: not-allowed; }
+.upload-result { display: flex; align-items: center; gap: 11px; margin-top: 13px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+.upload-result--complete { border-color: rgba(216,255,98,0.22); color: var(--accent); }
+.upload-result--partial, .upload-result--unavailable { border-color: rgba(255,173,74,0.24); color: #ffbd69; }
+.upload-result > div { display: grid; gap: 3px; }
+.upload-result strong { color: #f2f4f2; font-size: 11px; }
+.upload-result span { color: var(--muted); font-size: 9px; }
+.spin { animation: spin 800ms linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
 .empty-state { display: flex; min-height: 66vh; align-items: center; justify-content: center; flex-direction: column; padding: 50px 24px; text-align: center; }
 .empty-state--compact { min-height: 260px; border: 1px dashed var(--line); border-radius: 18px; }
 .empty-state-icon { display: grid; width: 54px; height: 54px; place-items: center; margin-bottom: 18px; border-radius: 16px; background: var(--surface-2); color: var(--accent); }
@@ -294,6 +357,10 @@ h1, h2, h3, .brand-copy strong { font-family: "SF Pro Display", "PingFang SC", s
   .viewer-backdrop { grid-template-columns: 1fr; overflow-y: auto; }
   .viewer-canvas { min-height: 70vh; }
   .viewer-panel { min-height: 360px; border-top: 1px solid var(--line); border-left: 0; }
+  .upload-hero { align-items: flex-start; flex-direction: column; }
+  .upload-rule-card { min-width: 0; width: 100%; }
+  .import-field-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .import-tags-field { grid-column: span 1; }
 }
 
 @media (max-width: 560px) {
@@ -312,4 +379,15 @@ h1, h2, h3, .brand-copy strong { font-family: "SF Pro Display", "PingFang SC", s
   .module-heading h2 { font-size: 24px; }
   .viewer-canvas { padding: 64px 20px; }
   .viewer-nav { top: auto; bottom: 12px; transform: none; }
+  .naming-guide { align-items: flex-start; flex-direction: column; }
+  .naming-guide svg { transform: rotate(90deg); }
+  .upload-dropzone { grid-template-columns: auto 1fr; padding: 20px; }
+  .upload-dropzone-hint { grid-column: 1 / -1; }
+  .import-preview-heading { align-items: flex-start; flex-direction: column; }
+  .import-meta-grid { grid-template-columns: 1fr; }
+  .import-file-card { grid-template-columns: 64px minmax(0, 1fr) auto; }
+  .import-file-thumb { min-height: 92px; }
+  .import-field-grid { grid-template-columns: 1fr; }
+  .rejected-files > div { grid-template-columns: 1fr; }
+  .upload-submit-bar { bottom: 74px; }
 }

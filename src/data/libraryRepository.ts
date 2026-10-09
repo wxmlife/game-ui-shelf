@@ -7,6 +7,7 @@ export interface ImportSubmissionFile {
   gameName: string
   moduleKey: string
   moduleName: string
+  flowName?: string
   title: string
   tags: string[]
   sequenceOrder: number
