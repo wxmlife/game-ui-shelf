@@ -1,4 +1,4 @@
-import { ArrowLeft, CalendarDays, Gamepad2, Image as ImageIcon, Upload } from 'lucide-react'
+import { ArrowLeft, CalendarDays, Gamepad2, Image as ImageIcon, Pencil, Upload } from 'lucide-react'
 import { type CSSProperties, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 
@@ -6,7 +6,8 @@ import { useLibrary } from '../app/LibraryContext'
 import { EmptyState } from '../components/EmptyState'
 import { ImageCard } from '../components/ImageCard'
 import { ImageViewer } from '../components/ImageViewer'
-import type { UiImage } from '../domain/models'
+import { ModuleEditor } from '../components/ModuleEditor'
+import type { GameModule, UiImage } from '../domain/models'
 
 function groupByFlow(images: UiImage[]): Array<[string, UiImage[]]> {
   const groups = new Map<string, UiImage[]>()
@@ -19,8 +20,9 @@ function groupByFlow(images: UiImage[]): Array<[string, UiImage[]]> {
 
 export function GamePage() {
   const { gameId } = useParams()
-  const { snapshot, loading, error } = useLibrary()
+  const { snapshot, loading, error, repository, refresh } = useLibrary()
   const [selectedImage, setSelectedImage] = useState<UiImage | null>(null)
+  const [editingModule, setEditingModule] = useState<GameModule | null>(null)
 
   const game = snapshot?.games.find((item) => item.id === gameId)
   const modules = useMemo(
@@ -77,7 +79,12 @@ export function GamePage() {
             <section className="module-section" id={`module-${module.id}`} key={module.id}>
               <header className="module-heading">
                 <div><span>{module.key}</span><h2>{module.name}</h2></div>
-                <p>{moduleImages.length} 张</p>
+                <div className="module-heading-actions">
+                  <p>{moduleImages.length} 张</p>
+                  {repository.updateModule && (
+                    <button type="button" aria-label={`编辑 ${module.name}模块`} onClick={() => setEditingModule(module)}><Pencil size={14} /> 编辑</button>
+                  )}
+                </div>
               </header>
               {moduleImages.length ? (
                 groupByFlow(moduleImages).map(([flowName, images]) => (
@@ -108,6 +115,22 @@ export function GamePage() {
             .sort((a, b) => a.sequenceOrder - b.sequenceOrder)}
           initialImageId={selectedImage.id}
           onClose={() => setSelectedImage(null)}
+          onSaveMetadata={repository.updateImageMetadata ? async (imageId, update) => {
+            await repository.updateImageMetadata?.(imageId, update)
+            setSelectedImage(null)
+            await refresh()
+          } : undefined}
+        />
+      )}
+      {editingModule && repository.updateModule && (
+        <ModuleEditor
+          module={editingModule}
+          onClose={() => setEditingModule(null)}
+          onSave={async (update) => {
+            await repository.updateModule?.(editingModule.id, update)
+            setEditingModule(null)
+            await refresh()
+          }}
         />
       )}
     </main>

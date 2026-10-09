@@ -4,7 +4,10 @@ import type { Game, GameModule, LibrarySnapshot, UiImage } from '../domain/model
 import type {
   ImportSubmission,
   ImportSubmissionFile,
+  ImageMetadataUpdate,
   LibraryRepository,
+  ModuleUpdate,
+  MutationResult,
   UploadBatchResult,
 } from './libraryRepository'
 
@@ -315,5 +318,56 @@ export class SupabaseLibraryRepository implements LibraryRepository {
   async signOut(): Promise<void> {
     const { error } = await this.client.auth.signOut()
     if (error) throw error
+  }
+
+  async updateModule(moduleId: string, update: ModuleUpdate): Promise<MutationResult> {
+    const userId = await this.userId()
+    const { error } = await this.client
+      .from('modules')
+      .update({ key: update.key.trim(), name: update.name.trim() })
+      .eq('id', moduleId)
+      .eq('owner_id', userId)
+    if (error) throw error
+    return { status: 'complete' }
+  }
+
+  async updateImageMetadata(imageId: string, update: ImageMetadataUpdate): Promise<MutationResult> {
+    const userId = await this.userId()
+    let flowId: string | null = null
+    if (update.flowName.trim()) {
+      flowId = await this.rowId('flows', 'upsert', {
+        owner_id: userId,
+        module_id: update.moduleId,
+        name: update.flowName.trim(),
+        sort_order: 0,
+      }, { onConflict: 'owner_id,module_id,name' })
+    }
+
+    const { error: imageError } = await this.client
+      .from('ui_images')
+      .update({
+        title: update.title.trim(),
+        flow_id: flowId,
+        sequence_order: update.sequenceOrder,
+        search_text: [update.title, update.flowName, ...update.tags].filter(Boolean).join(' '),
+      })
+      .eq('id', imageId)
+      .eq('owner_id', userId)
+    if (imageError) throw imageError
+
+    const { error: deleteTagsError } = await this.client
+      .from('image_tags')
+      .delete()
+      .eq('image_id', imageId)
+      .eq('owner_id', userId)
+    if (deleteTagsError) throw deleteTagsError
+
+    for (const tagName of [...new Set(update.tags.map((tag) => tag.trim()).filter(Boolean))]) {
+      const tagId = await this.rowId('tags', 'upsert', { owner_id: userId, name: tagName }, { onConflict: 'owner_id,name' })
+      const { error } = await this.client.from('image_tags').insert({ owner_id: userId, image_id: imageId, tag_id: tagId })
+      if (error) throw error
+    }
+
+    return { status: 'complete' }
   }
 }

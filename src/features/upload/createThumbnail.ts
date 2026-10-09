@@ -1,6 +1,7 @@
 export const DEFAULT_THUMBNAIL_MAX_EDGE = 560
 
 const DEFAULT_WEBP_QUALITY = 0.82
+const IMAGE_DECODE_TIMEOUT_MS = 10_000
 
 export interface ThumbnailSize {
   width: number
@@ -86,8 +87,20 @@ function decodeImage(objectUrl: string, sourceName: string): Promise<HTMLImageEl
     const image = new Image()
     image.decoding = 'async'
 
-    image.onload = () => resolve(image)
-    image.onerror = () => reject(new Error(`无法解码图片“${sourceName}”`))
+    const timeout = window.setTimeout(() => {
+      image.onload = null
+      image.onerror = null
+      reject(new Error(`图片“${sourceName}”解码超时`))
+    }, IMAGE_DECODE_TIMEOUT_MS)
+
+    image.onload = () => {
+      window.clearTimeout(timeout)
+      resolve(image)
+    }
+    image.onerror = () => {
+      window.clearTimeout(timeout)
+      reject(new Error(`无法解码图片“${sourceName}”`))
+    }
     image.src = objectUrl
   })
 }

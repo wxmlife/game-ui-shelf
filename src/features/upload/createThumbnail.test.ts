@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { calculateThumbnailSize, createThumbnail } from './createThumbnail'
 
 afterEach(() => {
+  vi.useRealTimers()
   vi.unstubAllGlobals()
 })
 
@@ -79,5 +80,28 @@ describe('createThumbnail', () => {
     await expect(createThumbnail(source)).rejects.toThrow('无法解码图片“broken.png”')
     expect(revokeObjectURL).toHaveBeenCalledOnce()
     expect(revokeObjectURL).toHaveBeenCalledWith('blob:broken-image')
+  })
+
+  it('times out and revokes the object URL when decoding never settles', async () => {
+    vi.useFakeTimers()
+    const revokeObjectURL = vi.fn()
+    vi.stubGlobal('URL', {
+      createObjectURL: vi.fn(() => 'blob:stalled-image'),
+      revokeObjectURL,
+    })
+    class StalledImage {
+      decoding = ''
+      onload: (() => void) | null = null
+      onerror: (() => void) | null = null
+      src = ''
+    }
+    vi.stubGlobal('Image', StalledImage)
+
+    const promise = createThumbnail(new File(['image'], 'stalled.png', { type: 'image/png' }))
+    const assertion = expect(promise).rejects.toThrow('图片“stalled.png”解码超时')
+    await vi.advanceTimersByTimeAsync(10_000)
+
+    await assertion
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:stalled-image')
   })
 })

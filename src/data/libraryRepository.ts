@@ -34,9 +34,29 @@ export interface UploadBatchResult {
   message?: string
 }
 
+export interface MutationResult {
+  status: 'complete' | 'unavailable'
+  message?: string
+}
+
+export interface ModuleUpdate {
+  key: string
+  name: string
+}
+
+export interface ImageMetadataUpdate {
+  moduleId: string
+  title: string
+  flowName: string
+  sequenceOrder: number
+  tags: string[]
+}
+
 export interface LibraryRepository {
   readonly mode: 'demo' | 'cloud'
   getSnapshot(): Promise<LibrarySnapshot>
   submitImport(draft: ImportSubmission): Promise<UploadBatchResult>
+  updateModule?(moduleId: string, update: ModuleUpdate): Promise<MutationResult>
+  updateImageMetadata?(imageId: string, update: ImageMetadataUpdate): Promise<MutationResult>
   signOut?(): Promise<void>
 }

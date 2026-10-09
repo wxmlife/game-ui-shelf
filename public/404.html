@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="robots" content="noindex" />
+    <title>返回 UI Shelf</title>
+    <style>
+      :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
+      body { display: grid; min-height: 100vh; margin: 0; place-items: center; background: #0d100f; color: #eef1ed; }
+      main { max-width: 30rem; padding: 2rem; text-align: center; }
+      a { color: #d8ff62; }
+    </style>
+    <script>
+      (() => {
+        const parts = window.location.pathname.split('/').filter(Boolean)
+        const isGitHubPages = window.location.hostname.endsWith('.github.io')
+        const entry = isGitHubPages && parts.length > 1 ? `/${parts[0]}/` : '/'
+        window.location.replace(`${entry}#/`)
+      })()
+    </script>
+  </head>
+  <body>
+    <main>
+      <h1>正在返回 UI Shelf…</h1>
+      <p>如果没有自动跳转，<a href="./">手动返回站点入口</a>。</p>
+    </main>
+  </body>
+</html>

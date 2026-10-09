@@ -5,6 +5,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { App } from '../app/App'
 import type { LibraryRepository } from '../data/libraryRepository'
 
+vi.mock('../features/upload/createThumbnail', () => ({
+  createThumbnail: vi.fn(async () => new Blob(['thumbnail'], { type: 'image/webp' })),
+}))
+
 function folderFile(path: string) {
   const fileName = path.split('/').at(-1) ?? path
   const file = new File(['image'], fileName, { type: 'image/png', lastModified: 123 })
