@@ -2,6 +2,10 @@ import type { LibrarySnapshot, UiImage } from '../domain/models'
 
 const createdAt = '2026-10-01T08:00:00.000Z'
 
+export function demoAsset(name: string, baseUrl = import.meta.env.BASE_URL): string {
+  return `${baseUrl}demo/${name}.svg`
+}
+
 function image(
   id: string,
   gameId: string,
@@ -21,8 +25,8 @@ function image(
     flowName: options.flowName,
     title,
     originalFilename: `${moduleKey}${moduleName}-${title}.png`,
-    imageUrl: `/demo/${id}.svg`,
-    thumbnailUrl: `/demo/${id}.svg`,
+    imageUrl: demoAsset(id),
+    thumbnailUrl: demoAsset(id),
     width: 1170,
     height: 2532,
     sequenceOrder,
@@ -41,7 +45,7 @@ export const demoSnapshot: LibrarySnapshot = {
       slug: 'idol-empire',
       name: 'IDOL Empire',
       aliases: ['偶像帝国', 'IDOL'],
-      coverUrl: '/demo/idol-cover.svg',
+      coverUrl: demoAsset('idol-cover'),
       coverTone: '#ff7452',
       developer: 'Kingboat Studio',
       platforms: ['iOS', 'Android'],
@@ -55,7 +59,7 @@ export const demoSnapshot: LibrarySnapshot = {
       slug: 'hades-ii',
       name: 'Hades II',
       aliases: ['哈迪斯 2'],
-      coverUrl: '/demo/hades-cover.svg',
+      coverUrl: demoAsset('hades-cover'),
       coverTone: '#8be1ca',
       developer: 'Supergiant Games',
       platforms: ['PC'],
@@ -69,7 +73,7 @@ export const demoSnapshot: LibrarySnapshot = {
       slug: 'genshin-impact',
       name: 'Genshin Impact',
       aliases: ['原神'],
-      coverUrl: '/demo/genshin-cover.svg',
+      coverUrl: demoAsset('genshin-cover'),
       coverTone: '#7d9fd7',
       developer: 'HoYoverse',
       platforms: ['iOS', 'Android', 'PC', 'PlayStation'],
@@ -83,7 +87,7 @@ export const demoSnapshot: LibrarySnapshot = {
       slug: 'reverse-1999',
       name: 'Reverse: 1999',
       aliases: ['重返未来：1999'],
-      coverUrl: '/demo/reverse-cover.svg',
+      coverUrl: demoAsset('reverse-cover'),
       coverTone: '#d0ae7d',
       developer: 'Bluepoch',
       platforms: ['iOS', 'Android', 'PC'],
