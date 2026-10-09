@@ -17,16 +17,28 @@ export function LibraryPage() {
     [snapshot],
   )
   const tags = useMemo(
-    () => [...new Set(snapshot?.games.flatMap((game) => game.tags) ?? [])].sort(),
+    () => [
+      ...new Set([
+        ...(snapshot?.games.flatMap((game) => game.tags) ?? []),
+        ...(snapshot?.images.flatMap((image) => image.tags) ?? []),
+      ]),
+    ].sort(),
     [snapshot],
   )
   const games = useMemo(
-    () =>
-      snapshot?.games.filter(
+    () => {
+      if (!snapshot) return []
+
+      return snapshot.games.filter(
         (game) =>
           (!platform || game.platforms.includes(platform)) &&
-          (!tag || game.tags.includes(tag)),
-      ) ?? [],
+          (!tag ||
+            game.tags.includes(tag) ||
+            snapshot.images.some(
+              (image) => image.gameId === game.id && image.tags.includes(tag),
+            )),
+      )
+    },
     [snapshot, platform, tag],
   )
 

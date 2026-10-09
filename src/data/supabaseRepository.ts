@@ -13,7 +13,9 @@ import type {
 
 const ORIGINALS_BUCKET = 'game-ui-originals'
 const THUMBNAILS_BUCKET = 'game-ui-thumbnails'
-const SIGNED_URL_SECONDS = 10 * 60
+// A gallery can stay open during a full design session. One-day signed URLs
+// avoid broken thumbnails/downloads without making either bucket public.
+const SIGNED_URL_SECONDS = 24 * 60 * 60
 
 type Row = Record<string, unknown>
 
@@ -220,31 +222,25 @@ export class SupabaseLibraryRepository implements LibraryRepository {
         storedThumbnailPath = thumbnailPath
       }
 
-      const imageId = await this.rowId('ui_images', 'insert', {
-        owner_id: userId,
-        game_id: gameId,
-        capture_set_id: captureSetId,
-        module_id: moduleId,
-        flow_id: flowId ?? null,
-        title: item.title,
-        original_filename: item.originalFilename,
-        original_path: originalPath,
-        thumbnail_path: storedThumbnailPath,
-        mime_type: item.file.type || null,
-        file_size_bytes: item.file.size,
-        sequence_order: item.sequenceOrder,
-        fingerprint: `${item.file.size}:${item.file.lastModified}:${item.originalFilename.toLocaleLowerCase()}`,
-        search_text: [item.title, item.moduleKey, item.moduleName, item.flowName, ...item.tags].filter(Boolean).join(' '),
+      const { error: metadataError } = await this.client.rpc('create_ui_image_with_tags', {
+        p_game_id: gameId,
+        p_capture_set_id: captureSetId,
+        p_module_id: moduleId,
+        p_flow_id: flowId ?? null,
+        p_title: item.title,
+        p_original_filename: item.originalFilename,
+        p_original_path: originalPath,
+        p_thumbnail_path: storedThumbnailPath,
+        p_mime_type: item.file.type || 'application/octet-stream',
+        p_width: item.width ?? 0,
+        p_height: item.height ?? 0,
+        p_file_size_bytes: item.file.size,
+        p_sequence_order: item.sequenceOrder,
+        p_fingerprint: `${item.file.size}:${item.file.lastModified}:${item.originalFilename.toLocaleLowerCase()}`,
+        p_search_text: [item.title, item.moduleKey, item.moduleName, item.flowName, ...item.tags].filter(Boolean).join(' '),
+        p_tags: [...new Set(item.tags.map((tag) => tag.trim()).filter(Boolean))],
       })
-
-      for (const tagName of [...new Set(item.tags.map((tag) => tag.trim()).filter(Boolean))]) {
-        const tagId = await this.rowId('tags', 'upsert', { owner_id: userId, name: tagName }, { onConflict: 'owner_id,name' })
-        const { error } = await this.client.from('image_tags').upsert(
-          { owner_id: userId, image_id: imageId, tag_id: tagId },
-          { onConflict: 'owner_id,image_id,tag_id' },
-        )
-        if (error) throw error
-      }
+      if (metadataError) throw metadataError
     } catch (error) {
       await Promise.allSettled(uploaded.map(({ bucket, path }) => this.client.storage.from(bucket).remove([path])))
       throw error
@@ -332,41 +328,18 @@ export class SupabaseLibraryRepository implements LibraryRepository {
   }
 
   async updateImageMetadata(imageId: string, update: ImageMetadataUpdate): Promise<MutationResult> {
-    const userId = await this.userId()
-    let flowId: string | null = null
-    if (update.flowName.trim()) {
-      flowId = await this.rowId('flows', 'upsert', {
-        owner_id: userId,
-        module_id: update.moduleId,
-        name: update.flowName.trim(),
-        sort_order: 0,
-      }, { onConflict: 'owner_id,module_id,name' })
-    }
-
-    const { error: imageError } = await this.client
-      .from('ui_images')
-      .update({
-        title: update.title.trim(),
-        flow_id: flowId,
-        sequence_order: update.sequenceOrder,
-        search_text: [update.title, update.flowName, ...update.tags].filter(Boolean).join(' '),
-      })
-      .eq('id', imageId)
-      .eq('owner_id', userId)
-    if (imageError) throw imageError
-
-    const { error: deleteTagsError } = await this.client
-      .from('image_tags')
-      .delete()
-      .eq('image_id', imageId)
-      .eq('owner_id', userId)
-    if (deleteTagsError) throw deleteTagsError
-
-    for (const tagName of [...new Set(update.tags.map((tag) => tag.trim()).filter(Boolean))]) {
-      const tagId = await this.rowId('tags', 'upsert', { owner_id: userId, name: tagName }, { onConflict: 'owner_id,name' })
-      const { error } = await this.client.from('image_tags').insert({ owner_id: userId, image_id: imageId, tag_id: tagId })
-      if (error) throw error
-    }
+    await this.userId()
+    const tags = [...new Set(update.tags.map((tag) => tag.trim()).filter(Boolean))]
+    const { error } = await this.client.rpc('update_ui_image_metadata_with_tags', {
+      p_image_id: imageId,
+      p_module_id: update.moduleId,
+      p_title: update.title.trim(),
+      p_flow_name: update.flowName.trim(),
+      p_sequence_order: update.sequenceOrder,
+      p_search_text: [update.title, update.flowName, ...tags].filter(Boolean).join(' '),
+      p_tags: tags,
+    })
+    if (error) throw error
 
     return { status: 'complete' }
   }

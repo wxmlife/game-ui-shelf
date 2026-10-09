@@ -118,6 +118,13 @@ describe('searchCatalog', () => {
     expect(searchCatalog(snapshot, 'IDOL 商店', {}).images).toEqual([])
   })
 
+  it('finds image tags and keeps the owning game in the results', () => {
+    const result = searchCatalog(snapshot, '弹窗', {})
+
+    expect(result.images.map((image) => image.id)).toEqual(['reward-detail'])
+    expect(result.games.map((game) => game.id)).toEqual(['idol'])
+  })
+
   it('applies tag and platform filters together', () => {
     const result = searchCatalog(snapshot, '', {
       tags: ['奖励'],

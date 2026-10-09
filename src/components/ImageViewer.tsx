@@ -11,6 +11,15 @@ interface ImageViewerProps {
   onSaveMetadata?: (imageId: string, update: ImageMetadataUpdate) => Promise<void>
 }
 
+function isEditableTarget(target: EventTarget | null) {
+  if (!(target instanceof HTMLElement)) return false
+
+  const tagName = target.tagName.toLowerCase()
+  if (tagName === 'input' || tagName === 'textarea' || tagName === 'select') return true
+
+  return Boolean(target.closest('[contenteditable]:not([contenteditable="false"])'))
+}
+
 export function ImageViewer({ images, initialImageId, onClose, onSaveMetadata }: ImageViewerProps) {
   const initialIndex = Math.max(0, images.findIndex((image) => image.id === initialImageId))
   const [index, setIndex] = useState(initialIndex)
@@ -27,7 +36,18 @@ export function ImageViewer({ images, initialImageId, onClose, onSaveMetadata }:
 
   useEffect(() => {
     function handleKeydown(event: KeyboardEvent) {
-      if (event.key === 'Escape') onClose()
+      if (event.key === 'Escape') {
+        if (editing) {
+          setEditing(false)
+          setSaveError(null)
+        } else {
+          onClose()
+        }
+        return
+      }
+
+      if (editing || isEditableTarget(event.target)) return
+
       if (event.key === 'ArrowLeft' && canMove) {
         setIndex((current) => (current - 1 + images.length) % images.length)
       }
@@ -37,7 +57,7 @@ export function ImageViewer({ images, initialImageId, onClose, onSaveMetadata }:
     }
     window.addEventListener('keydown', handleKeydown)
     return () => window.removeEventListener('keydown', handleKeydown)
-  }, [canMove, images.length, onClose])
+  }, [canMove, editing, images.length, onClose])
 
   useEffect(() => {
     setEditing(false)

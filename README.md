@@ -38,7 +38,7 @@ npm run preview
 
 ### 2. 执行数据库 migration
 
-最直接的方式是打开 Supabase 的 **SQL Editor**，将 [`supabase/migrations/202610090001_initial_schema.sql`](supabase/migrations/202610090001_initial_schema.sql) 的全部内容粘贴并执行。建议在专用的新项目中执行。
+最直接的方式是打开 Supabase 的 **SQL Editor**，按文件名顺序执行 `supabase/migrations` 中的全部 SQL：先执行 [`202610090001_initial_schema.sql`](supabase/migrations/202610090001_initial_schema.sql)，再执行 [`202610090002_atomic_image_metadata.sql`](supabase/migrations/202610090002_atomic_image_metadata.sql)。建议在专用的新项目中执行；后续新增 migration 时也按时间戳顺序继续执行。
 
 如果已使用 Supabase CLI，也可以在仓库根目录运行：
 

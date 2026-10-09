@@ -7,7 +7,10 @@ import { UploadDropzone } from '../components/UploadDropzone'
 import type { UploadBatchResult } from '../data/libraryRepository'
 import { buildImportDraft } from '../features/upload/buildImportDraft'
 import { createThumbnail } from '../features/upload/createThumbnail'
+import type { ThumbnailBlob } from '../features/upload/createThumbnail'
 import type { UploadDraft, UploadDraftFile } from '../features/upload/uploadTypes'
+
+const THUMBNAIL_CONCURRENCY = 3
 
 function updateFiles(draft: UploadDraft, files: UploadDraftFile[]): UploadDraft {
   return {
@@ -16,6 +19,28 @@ function updateFiles(draft: UploadDraft, files: UploadDraftFile[]): UploadDraft 
     readyFiles: files.filter((file) => file.status === 'ready'),
     rejectedFiles: files.filter((file) => file.status === 'rejected'),
   }
+}
+
+async function mapWithConcurrency<T, R>(
+  items: readonly T[],
+  concurrency: number,
+  worker: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(items.length)
+  let nextIndex = 0
+
+  async function runWorker() {
+    while (nextIndex < items.length) {
+      const index = nextIndex
+      nextIndex += 1
+      results[index] = await worker(items[index])
+    }
+  }
+
+  await Promise.all(
+    Array.from({ length: Math.min(concurrency, items.length) }, () => runWorker()),
+  )
+  return results
 }
 
 export function UploadPage() {
@@ -46,8 +71,8 @@ export function UploadPage() {
     setSubmitting(true)
     setResult(null)
     try {
-      const files = await Promise.all(draft.readyFiles.map(async (item) => {
-        let thumbnail: Blob | undefined
+      const files = await mapWithConcurrency(draft.readyFiles, THUMBNAIL_CONCURRENCY, async (item) => {
+        let thumbnail: ThumbnailBlob | undefined
         try {
           thumbnail = await createThumbnail(item.file)
         } catch {
@@ -57,6 +82,8 @@ export function UploadPage() {
           id: item.id,
           file: item.file,
           thumbnail,
+          width: thumbnail?.sourceWidth,
+          height: thumbnail?.sourceHeight,
           gameName: draft.gameName,
           moduleKey: item.moduleKey,
           moduleName: item.moduleName,
@@ -66,7 +93,7 @@ export function UploadPage() {
           sequenceOrder: item.sequenceOrder,
           originalFilename: item.originalFilename,
         }
-      }))
+      })
       const nextResult = await repository.submitImport({
         gameName: draft.gameName.trim(),
         platform: draft.platform.trim() || undefined,
@@ -74,6 +101,12 @@ export function UploadPage() {
         files,
       })
       setResult(nextResult)
+      if (nextResult.status === 'partial') {
+        const failedIds = new Set(nextResult.failures.map((failure) => failure.fileId))
+        setDraft((current) => current
+          ? updateFiles(current, current.files.filter((file) => failedIds.has(file.id)))
+          : current)
+      }
       if (nextResult.status === 'complete' || nextResult.status === 'partial') await refresh()
     } catch (error) {
       setResult({
@@ -142,6 +175,16 @@ export function UploadPage() {
           <div>
             <strong>{result.status === 'complete' ? `已完成上传 ${result.uploaded} 张图片` : result.message}</strong>
             {result.status === 'partial' && result.uploaded > 0 && <span>已成功 {result.uploaded} 张，其余文件可稍后重试。</span>}
+            {result.status === 'partial' && result.failures.length > 0 && (
+              <ul aria-label="上传失败文件">
+                {result.failures.map((failure) => (
+                  <li key={failure.fileId}>
+                    <strong>{failure.fileName}</strong>
+                    <span>：{failure.message}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
             {result.status === 'unavailable' && <span>预览与资料编辑仍可正常使用。</span>}
           </div>
         </div>

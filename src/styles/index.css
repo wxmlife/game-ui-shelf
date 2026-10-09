@@ -342,6 +342,8 @@ h1, h2, h3, .brand-copy strong { font-family: "SF Pro Display", "PingFang SC", s
 .upload-result > div { display: grid; gap: 3px; }
 .upload-result strong { color: #f2f4f2; font-size: 11px; }
 .upload-result span { color: var(--muted); font-size: 9px; }
+.upload-result ul { display: grid; gap: 5px; margin: 7px 0 0; padding: 0; list-style: none; }
+.upload-result li { display: flex; flex-wrap: wrap; gap: 2px; padding-top: 5px; border-top: 1px solid var(--line); }
 .spin { animation: spin 800ms linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 

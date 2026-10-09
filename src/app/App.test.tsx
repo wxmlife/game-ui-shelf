@@ -22,6 +22,21 @@ describe('App browsing experience', () => {
     expect(screen.getByText('4 本游戏')).toBeInTheDocument()
   })
 
+  it('filters games with tags defined only on their images', async () => {
+    const user = userEvent.setup()
+    renderAt('#/')
+
+    const tagFilter = await screen.findByRole('combobox', { name: '标签' })
+    expect(screen.getByRole('option', { name: '模拟经营' })).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: '弹窗' })).toBeInTheDocument()
+
+    await user.selectOptions(tagFilter, '弹窗')
+
+    expect(screen.getByRole('link', { name: '打开 IDOL Empire' })).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: '打开 Hades II' })).not.toBeInTheDocument()
+    expect(screen.getByText('1 本游戏')).toBeInTheDocument()
+  })
+
   it('searches from the global search box and opens matching results', async () => {
     const user = userEvent.setup()
     renderAt('#/')

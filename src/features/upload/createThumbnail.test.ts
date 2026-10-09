@@ -5,6 +5,7 @@ import { calculateThumbnailSize, createThumbnail } from './createThumbnail'
 afterEach(() => {
   vi.useRealTimers()
   vi.unstubAllGlobals()
+  vi.restoreAllMocks()
 })
 
 describe('calculateThumbnailSize', () => {
@@ -55,6 +56,37 @@ describe('calculateThumbnailSize', () => {
 })
 
 describe('createThumbnail', () => {
+  it('keeps the original dimensions on the generated thumbnail blob', async () => {
+    vi.stubGlobal('URL', {
+      createObjectURL: vi.fn(() => 'blob:valid-image'),
+      revokeObjectURL: vi.fn(),
+    })
+
+    class ValidImage {
+      decoding = ''
+      naturalWidth = 1170
+      naturalHeight = 2532
+      onload: (() => void) | null = null
+      onerror: (() => void) | null = null
+
+      set src(_value: string) {
+        queueMicrotask(() => this.onload?.())
+      }
+    }
+
+    vi.stubGlobal('Image', ValidImage)
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({ drawImage: vi.fn() } as never)
+    vi.spyOn(HTMLCanvasElement.prototype, 'toBlob').mockImplementation((callback) => {
+      callback(new Blob(['thumbnail'], { type: 'image/webp' }))
+    })
+
+    const thumbnail = await createThumbnail(new File(['image'], 'idol.png', { type: 'image/png' }))
+
+    expect(thumbnail.sourceWidth).toBe(1170)
+    expect(thumbnail.sourceHeight).toBe(2532)
+    expect(thumbnail.type).toBe('image/webp')
+  })
+
   it('revokes the object URL when image decoding fails', async () => {
     const revokeObjectURL = vi.fn()
 

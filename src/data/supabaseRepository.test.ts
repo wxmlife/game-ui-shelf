@@ -18,6 +18,7 @@ describe('SupabaseLibraryRepository', () => {
   })
 
   it('maps relational rows and signs private image paths', async () => {
+    const createSignedUrl = vi.fn(async (path: string, _expiresIn: number) => ({ data: { signedUrl: `signed://bucket/${path}` }, error: null }))
     const rows: Record<string, unknown[]> = {
       games: [{
         id: 'game-1', slug: 'idol', name: 'IDOL', aliases: ['偶像'], cover_thumbnail_path: 'user-1/game-1/cover.webp',
@@ -42,7 +43,10 @@ describe('SupabaseLibraryRepository', () => {
       })),
       storage: {
         from: vi.fn((bucket: string) => ({
-          createSignedUrl: vi.fn(async (path: string) => ({ data: { signedUrl: `signed://${bucket}/${path}` }, error: null })),
+          createSignedUrl: vi.fn(async (path: string, expiresIn: number) => {
+            const result = await createSignedUrl(path, expiresIn)
+            return { data: { signedUrl: result.data.signedUrl.replace('bucket', bucket) }, error: result.error }
+          }),
         })),
       },
     }
@@ -56,10 +60,12 @@ describe('SupabaseLibraryRepository', () => {
       imageUrl: 'signed://game-ui-originals/user-1/game-1/image-1/original.png',
       thumbnailUrl: 'signed://game-ui-thumbnails/user-1/game-1/image-1/thumb.webp',
     })
+    expect(createSignedUrl).toHaveBeenCalledWith(expect.any(String), 86_400)
   })
 
   it('reports per-file partial upload failures while preserving successes', async () => {
     let originalUploads = 0
+    const rpc = vi.fn().mockResolvedValue({ data: 'image-1', error: null })
     const tableIds: Record<string, string> = {
       games: 'game-1', capture_sets: 'set-1', modules: 'module-1', flows: 'flow-1', ui_images: 'image-1', tags: 'tag-1',
     }
@@ -69,6 +75,7 @@ describe('SupabaseLibraryRepository', () => {
         upsert: vi.fn(() => ({ select: vi.fn(() => ({ single: vi.fn().mockResolvedValue({ data: { id: tableIds[table] }, error: null }) })) })),
         insert: vi.fn(() => ({ select: vi.fn(() => ({ single: vi.fn().mockResolvedValue({ data: { id: tableIds[table] }, error: null }) })) })),
       })),
+      rpc,
       storage: {
         from: vi.fn((bucket: string) => ({
           upload: vi.fn(async () => {
@@ -86,6 +93,8 @@ describe('SupabaseLibraryRepository', () => {
       files: ['one.png', 'two.png'].map((name, index) => ({
         id: `file-${index + 1}`,
         file: new File(['image'], name, { type: 'image/png' }),
+        width: 1170,
+        height: 2532,
         gameName: 'IDOL', moduleKey: 'reward', moduleName: '奖励', flowName: '领取奖励',
         title: index ? '奖励领取' : '奖励详情', tags: ['奖励'], sequenceOrder: index + 1, originalFilename: name,
       })),
@@ -96,5 +105,38 @@ describe('SupabaseLibraryRepository', () => {
 
     expect(result).toMatchObject({ status: 'partial', uploaded: 1 })
     expect(result.failures).toEqual([{ fileId: 'file-2', fileName: 'two.png', message: 'storage full' }])
+    expect(rpc).toHaveBeenCalledOnce()
+    expect(rpc).toHaveBeenCalledWith('create_ui_image_with_tags', expect.objectContaining({
+      p_width: 1170,
+      p_height: 2532,
+      p_tags: ['奖励'],
+    }))
+  })
+
+  it('uses one transactional RPC when updating image metadata and tags', async () => {
+    const rpc = vi.fn().mockResolvedValue({ data: null, error: null })
+    const client = {
+      auth: { getSession: vi.fn().mockResolvedValue(session()) },
+      rpc,
+    }
+    const repository = new SupabaseLibraryRepository(client as never)
+
+    await repository.updateImageMetadata('image-1', {
+      moduleId: 'module-1',
+      title: '奖励领取成功',
+      flowName: '领取奖励',
+      sequenceOrder: 3,
+      tags: ['奖励', '反馈', '奖励'],
+    })
+
+    expect(rpc).toHaveBeenCalledWith('update_ui_image_metadata_with_tags', {
+      p_image_id: 'image-1',
+      p_module_id: 'module-1',
+      p_title: '奖励领取成功',
+      p_flow_name: '领取奖励',
+      p_sequence_order: 3,
+      p_search_text: '奖励领取成功 领取奖励 奖励 反馈',
+      p_tags: ['奖励', '反馈'],
+    })
   })
 })

@@ -4,6 +4,8 @@ export interface ImportSubmissionFile {
   id: string
   file: File
   thumbnail?: Blob
+  width?: number
+  height?: number
   gameName: string
   moduleKey: string
   moduleName: string

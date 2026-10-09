@@ -8,6 +8,11 @@ export interface ThumbnailSize {
   height: number
 }
 
+export interface ThumbnailBlob extends Blob {
+  readonly sourceWidth: number
+  readonly sourceHeight: number
+}
+
 /**
  * Calculates integer canvas dimensions without ever enlarging the source.
  */
@@ -43,7 +48,7 @@ export function calculateThumbnailSize(
 export async function createThumbnail(
   source: File,
   maxEdge = DEFAULT_THUMBNAIL_MAX_EDGE,
-): Promise<Blob> {
+): Promise<ThumbnailBlob> {
   if (!source.type.startsWith('image/')) {
     throw new TypeError(`文件“${source.name}”不是可解码的图片`)
   }
@@ -76,7 +81,12 @@ export async function createThumbnail(
       throw new Error(`无法为“${source.name}”生成缩略图`)
     }
 
-    return blob
+    Object.defineProperties(blob, {
+      sourceWidth: { value: image.naturalWidth, enumerable: true },
+      sourceHeight: { value: image.naturalHeight, enumerable: true },
+    })
+
+    return blob as ThumbnailBlob
   } finally {
     URL.revokeObjectURL(objectUrl)
   }
