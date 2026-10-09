@@ -1,13 +1,16 @@
-import { BookOpen, Cloud, HardDrive, Settings, Upload } from 'lucide-react'
+import { BookOpen, Cloud, HardDrive, LogOut, Settings, Upload } from 'lucide-react'
 import { Link, NavLink, Outlet } from 'react-router-dom'
 
 import { SearchBox } from '../components/SearchBox'
+import { useLibrary } from './LibraryContext'
 
 interface AppShellProps {
   repositoryMode: 'demo' | 'cloud'
 }
 
 export function AppShell({ repositoryMode }: AppShellProps) {
+  const { repository } = useLibrary()
+
   return (
     <div className="app-shell">
       <header className="topbar">
@@ -28,6 +31,11 @@ export function AppShell({ repositoryMode }: AppShellProps) {
             <Upload size={17} />
             上传
           </Link>
+          {repositoryMode === 'cloud' && repository.signOut && (
+            <button className="topbar-signout" type="button" aria-label="退出登录" onClick={() => void repository.signOut?.()}>
+              <LogOut size={17} />
+            </button>
+          )}
         </div>
       </header>
 

@@ -38,4 +38,5 @@ export interface LibraryRepository {
   readonly mode: 'demo' | 'cloud'
   getSnapshot(): Promise<LibrarySnapshot>
   submitImport(draft: ImportSubmission): Promise<UploadBatchResult>
+  signOut?(): Promise<void>
 }

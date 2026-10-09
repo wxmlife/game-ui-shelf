@@ -1,7 +1,6 @@
 import { HashRouter, Route, Routes } from 'react-router-dom'
 
 import { EmptyState } from '../components/EmptyState'
-import { demoRepository } from '../data/demoRepository'
 import type { LibraryRepository } from '../data/libraryRepository'
 import { GamePage } from '../pages/GamePage'
 import { LibraryPage } from '../pages/LibraryPage'
@@ -9,12 +8,13 @@ import { SearchPage } from '../pages/SearchPage'
 import { UploadPage } from '../pages/UploadPage'
 import { AppShell } from './AppShell'
 import { LibraryProvider } from './LibraryContext'
+import { RepositoryProvider } from './RepositoryProvider'
 
 interface AppProps {
   repository?: LibraryRepository
 }
 
-export function App({ repository = demoRepository }: AppProps) {
+function RoutedApp({ repository }: { repository: LibraryRepository }) {
   return (
     <HashRouter>
       <LibraryProvider repository={repository}>
@@ -53,4 +53,9 @@ export function App({ repository = demoRepository }: AppProps) {
       </LibraryProvider>
     </HashRouter>
   )
+}
+
+export function App({ repository }: AppProps) {
+  if (repository) return <RoutedApp repository={repository} />
+  return <RepositoryProvider>{(resolvedRepository) => <RoutedApp repository={resolvedRepository} />}</RepositoryProvider>
 }
