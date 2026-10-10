@@ -18,4 +18,19 @@ describe('deriveAutoTags', () => {
       '公会', '兑换', '商店', '任务', '奖励', '签到',
     ])
   })
+
+  it('keeps dictionary tags when Intl.Segmenter is unavailable', () => {
+    const segmenterDescriptor = Object.getOwnPropertyDescriptor(Intl, 'Segmenter')
+    Object.defineProperty(Intl, 'Segmenter', { configurable: true, value: undefined })
+
+    try {
+      expect(deriveAutoTags('公会', '兑换商店界面_神秘机制')).toEqual(['公会', '兑换', '商店'])
+    } finally {
+      if (segmenterDescriptor) {
+        Object.defineProperty(Intl, 'Segmenter', segmenterDescriptor)
+      } else {
+        Reflect.deleteProperty(Intl, 'Segmenter')
+      }
+    }
+  })
 })

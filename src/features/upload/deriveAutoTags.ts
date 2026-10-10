@@ -32,6 +32,8 @@ export function deriveAutoTags(moduleName: string, title: string): string[] {
 
   for (const match of keywordMatches) add(match.word)
 
+  if (typeof Intl.Segmenter !== 'function') return tags
+
   const segmenter = new Intl.Segmenter('zh', { granularity: 'word' })
   for (const segment of segmenter.segment(title.replaceAll('_', ' '))) {
     const word = segment.segment.trim()
