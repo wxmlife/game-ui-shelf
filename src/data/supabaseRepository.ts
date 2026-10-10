@@ -45,8 +45,10 @@ function slugify(value: string): string {
   return slug || `game-${Date.now()}`
 }
 
-function safePathSegment(value: string): string {
-  return value.normalize('NFKC').replace(/[^a-zA-Z0-9._\-\p{Script=Han}]+/gu, '-').slice(0, 120) || 'image'
+function safeFileExtension(value: string): string {
+  const dotIndex = value.lastIndexOf('.')
+  if (dotIndex < 0) return 'bin'
+  return value.slice(dotIndex + 1).toLocaleLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 10) || 'bin'
 }
 
 function uniqueId(): string {
@@ -79,9 +81,12 @@ export class SupabaseLibraryRepository implements LibraryRepository {
     return (data ?? []) as unknown as Row[]
   }
 
-  private async signedUrl(bucket: string, path: unknown): Promise<string> {
+  private async signedUrl(bucket: string, path: unknown, downloadName?: string): Promise<string> {
     if (typeof path !== 'string' || !path) return ''
-    const { data, error } = await this.client.storage.from(bucket).createSignedUrl(path, SIGNED_URL_SECONDS)
+    const storage = this.client.storage.from(bucket)
+    const { data, error } = downloadName
+      ? await storage.createSignedUrl(path, SIGNED_URL_SECONDS, { download: downloadName })
+      : await storage.createSignedUrl(path, SIGNED_URL_SECONDS)
     if (error) throw error
     return data.signedUrl
   }
@@ -105,7 +110,9 @@ export class SupabaseLibraryRepository implements LibraryRepository {
         .map((tag) => text(tag?.name))
         .filter(Boolean)
 
+      const originalFilename = text(row.original_filename)
       const imageUrl = await this.signedUrl(ORIGINALS_BUCKET, row.original_path)
+      const downloadUrl = await this.signedUrl(ORIGINALS_BUCKET, row.original_path, originalFilename)
       const thumbnailUrl = await this.signedUrl(THUMBNAILS_BUCKET, row.thumbnail_path)
 
       return {
@@ -118,8 +125,9 @@ export class SupabaseLibraryRepository implements LibraryRepository {
         flowId: text(row.flow_id) || undefined,
         flowName: text(flow?.name) || undefined,
         title: text(row.title),
-        originalFilename: text(row.original_filename),
+        originalFilename,
         imageUrl,
+        downloadUrl,
         thumbnailUrl: thumbnailUrl || imageUrl,
         width: number(row.width),
         height: number(row.height),
@@ -198,7 +206,7 @@ export class SupabaseLibraryRepository implements LibraryRepository {
     item: ImportSubmissionFile,
   ): Promise<void> {
     const objectId = uniqueId()
-    const originalPath = `${userId}/${gameId}/${objectId}/${safePathSegment(item.originalFilename)}`
+    const originalPath = `${userId}/${gameId}/${objectId}/original.${safeFileExtension(item.originalFilename)}`
     const thumbnailExtension = item.thumbnail?.type === 'image/png' ? 'png' : 'webp'
     const thumbnailPath = `${userId}/${gameId}/${objectId}/thumbnail.${thumbnailExtension}`
     const uploaded: Array<{ bucket: string; path: string }> = []

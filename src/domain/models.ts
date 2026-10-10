@@ -53,6 +53,7 @@ export interface UiImage {
   title: string
   originalFilename: string
   imageUrl: string
+  downloadUrl?: string
   thumbnailUrl: string
   width: number
   height: number

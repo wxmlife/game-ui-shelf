@@ -18,7 +18,16 @@ describe('SupabaseLibraryRepository', () => {
   })
 
   it('maps relational rows and signs private image paths', async () => {
-    const createSignedUrl = vi.fn(async (path: string, _expiresIn: number) => ({ data: { signedUrl: `signed://bucket/${path}` }, error: null }))
+    const createSignedUrl = vi.fn(async (
+      path: string,
+      _expiresIn: number,
+      options?: { download?: string | boolean },
+    ) => ({
+      data: {
+        signedUrl: `signed://bucket/${path}${options?.download ? `?download=${encodeURIComponent(String(options.download))}` : ''}`,
+      },
+      error: null,
+    }))
     const rows: Record<string, unknown[]> = {
       games: [{
         id: 'game-1', slug: 'idol', name: 'IDOL', aliases: ['偶像'], cover_thumbnail_path: 'user-1/game-1/cover.webp',
@@ -43,8 +52,8 @@ describe('SupabaseLibraryRepository', () => {
       })),
       storage: {
         from: vi.fn((bucket: string) => ({
-          createSignedUrl: vi.fn(async (path: string, expiresIn: number) => {
-            const result = await createSignedUrl(path, expiresIn)
+          createSignedUrl: vi.fn(async (path: string, expiresIn: number, options?: { download?: string | boolean }) => {
+            const result = await createSignedUrl(path, expiresIn, options)
             return { data: { signedUrl: result.data.signedUrl.replace('bucket', bucket) }, error: result.error }
           }),
         })),
@@ -58,9 +67,15 @@ describe('SupabaseLibraryRepository', () => {
     expect(snapshot.images[0]).toMatchObject({
       moduleKey: 'reward', moduleName: '奖励', flowName: '领取奖励', tags: ['弹窗', '奖励'],
       imageUrl: 'signed://game-ui-originals/user-1/game-1/image-1/original.png',
+      downloadUrl: 'signed://game-ui-originals/user-1/game-1/image-1/original.png?download=reward%E5%A5%96%E5%8A%B1-%E5%A5%96%E5%8A%B1%E8%AF%A6%E6%83%85.png',
       thumbnailUrl: 'signed://game-ui-thumbnails/user-1/game-1/image-1/thumb.webp',
     })
-    expect(createSignedUrl).toHaveBeenCalledWith(expect.any(String), 86_400)
+    expect(createSignedUrl).toHaveBeenCalledWith(
+      'user-1/game-1/image-1/original.png',
+      86_400,
+      { download: 'reward奖励-奖励详情.png' },
+    )
+    expect(createSignedUrl.mock.calls.every(([, expiresIn]) => expiresIn === 86_400)).toBe(true)
   })
 
   it('reports per-file partial upload failures while preserving successes', async () => {
@@ -110,6 +125,61 @@ describe('SupabaseLibraryRepository', () => {
       p_width: 1170,
       p_height: 2532,
       p_tags: ['奖励'],
+    }))
+  })
+
+  it('uses an ASCII storage key while preserving a Chinese original filename', async () => {
+    const uploadedPaths: string[] = []
+    const rpc = vi.fn().mockResolvedValue({ data: 'image-1', error: null })
+    const tableIds: Record<string, string> = {
+      games: 'game-1', capture_sets: 'set-1', modules: 'module-1', flows: 'flow-1',
+    }
+    const client = {
+      auth: { getSession: vi.fn().mockResolvedValue(session()) },
+      from: vi.fn((table: string) => ({
+        upsert: vi.fn(() => ({ select: vi.fn(() => ({ single: vi.fn().mockResolvedValue({ data: { id: tableIds[table] }, error: null }) })) })),
+        insert: vi.fn(() => ({ select: vi.fn(() => ({ single: vi.fn().mockResolvedValue({ data: { id: tableIds[table] }, error: null }) })) })),
+      })),
+      rpc,
+      storage: {
+        from: vi.fn(() => ({
+          upload: vi.fn(async (path: string) => {
+            uploadedPaths.push(path)
+            return { data: { path }, error: null }
+          }),
+          remove: vi.fn().mockResolvedValue({ data: [], error: null }),
+        })),
+      },
+    }
+    const originalFilename = '公会_总榜已解锁.jpeg'
+    const draft: ImportSubmission = {
+      gameName: 'IDOL Empire',
+      platform: 'iOS',
+      version: '',
+      files: [{
+        id: 'file-1',
+        file: new File(['image'], originalFilename, { type: 'image/jpeg' }),
+        gameName: 'IDOL Empire',
+        moduleKey: '公会',
+        moduleName: '公会',
+        flowName: '总榜已解锁',
+        title: '总榜已解锁',
+        tags: ['公会'],
+        sequenceOrder: 1,
+        originalFilename,
+      }],
+    }
+    const repository = new SupabaseLibraryRepository(client as never)
+
+    const result = await repository.submitImport(draft)
+
+    expect(result.status).toBe('complete')
+    expect(uploadedPaths).toHaveLength(1)
+    expect(uploadedPaths[0]).toMatch(/^[\x20-\x7e]+$/)
+    expect(uploadedPaths[0]).toMatch(/\/original\.jpeg$/)
+    expect(rpc).toHaveBeenCalledWith('create_ui_image_with_tags', expect.objectContaining({
+      p_original_filename: originalFilename,
+      p_original_path: uploadedPaths[0],
     }))
   })
 

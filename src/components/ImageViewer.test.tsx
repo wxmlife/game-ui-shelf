@@ -3,9 +3,36 @@ import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
 import { demoSnapshot } from '../data/demoData'
+import type { UiImage } from '../domain/models'
 import { ImageViewer } from './ImageViewer'
 
 const images = demoSnapshot.images.slice(0, 2)
+
+describe('ImageViewer', () => {
+  it('uses the filename-preserving URL for original downloads', () => {
+    const image: UiImage = {
+      id: 'image-1',
+      gameId: 'game-1',
+      moduleId: 'module-1',
+      moduleKey: '公会',
+      moduleName: '公会',
+      title: '总榜已解锁',
+      originalFilename: '公会_总榜已解锁.jpeg',
+      imageUrl: 'https://storage.example/original.jpeg?token=preview',
+      downloadUrl: 'https://storage.example/original.jpeg?token=download&download=chinese-name',
+      thumbnailUrl: 'https://storage.example/thumb.webp',
+      width: 1170,
+      height: 2532,
+      sequenceOrder: 1,
+      tags: ['公会'],
+      createdAt: '2026-10-10T00:00:00Z',
+    }
+
+    render(<ImageViewer images={[image]} initialImageId={image.id} onClose={vi.fn()} />)
+
+    expect(screen.getByRole('link', { name: '下载原图' })).toHaveAttribute('href', image.downloadUrl)
+  })
+})
 
 describe('ImageViewer keyboard behavior', () => {
   it('does not navigate while editing and lets Escape cancel editing before closing', async () => {

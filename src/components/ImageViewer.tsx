@@ -151,7 +151,7 @@ export function ImageViewer({ images, initialImageId, onClose, onSaveMetadata }:
             {onSaveMetadata && <button className="viewer-edit-button" type="button" onClick={beginEditing}><Pencil size={15} /> 编辑图片资料</button>}
           </>
         )}
-        <a className="secondary-button viewer-download" href={image.imageUrl} download={image.originalFilename}>
+        <a className="secondary-button viewer-download" href={image.downloadUrl || image.imageUrl} download={image.originalFilename}>
           <Download size={17} /> 下载原图
         </a>
       </aside>
