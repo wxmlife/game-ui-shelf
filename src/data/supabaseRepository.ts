@@ -68,6 +68,7 @@ function errorMessage(error: unknown): string {
 
 export class SupabaseLibraryRepository implements LibraryRepository {
   readonly mode = 'cloud' as const
+  private cleanupInFlight?: { ownerId: string; promise: Promise<void> }
 
   constructor(private readonly client: SupabaseClient) {}
 
@@ -118,9 +119,7 @@ export class SupabaseLibraryRepository implements LibraryRepository {
             const { data: removed, error: removeError } = await this.client.storage.from(bucket).remove(chunk.map((row) => row.path))
             if (removeError) throw removeError
             const returnedPaths = new Set((removed ?? []).map((item) => item.name))
-            const confirmed = returnedPaths.size
-              ? chunk.filter((row) => returnedPaths.has(row.path))
-              : chunk
+            const confirmed = chunk.filter((row) => returnedPaths.has(row.path))
             if (confirmed.length) {
               const { error: queueError } = await this.client.from('storage_cleanup_queue')
                 .delete()
@@ -141,6 +140,16 @@ export class SupabaseLibraryRepository implements LibraryRepository {
     return pending
   }
 
+  private startBackgroundCleanup(ownerId: string): void {
+    if (this.cleanupInFlight?.ownerId === ownerId) return
+    const promise = this.drainCleanupQueue(ownerId)
+      .then(() => undefined, () => undefined)
+      .finally(() => {
+        if (this.cleanupInFlight?.promise === promise) this.cleanupInFlight = undefined
+      })
+    this.cleanupInFlight = { ownerId, promise }
+  }
+
   private async cleanupResult(ownerId: string): Promise<MutationResult> {
     try {
       const pendingCleanup = await this.drainCleanupQueue(ownerId)
@@ -154,7 +163,7 @@ export class SupabaseLibraryRepository implements LibraryRepository {
 
   async getSnapshot(): Promise<LibrarySnapshot> {
     const ownerId = await this.userId()
-    try { await this.drainCleanupQueue(ownerId) } catch { /* Cleanup must not prevent reading the library. */ }
+    this.startBackgroundCleanup(ownerId)
     const [gameRows, captureRows, moduleRows, imageRows] = await Promise.all([
       this.rows('games'),
       this.rows('capture_sets'),

@@ -13,6 +13,11 @@ function mutationClient(
   initialRows: CleanupRow[] = [],
   removeFailure?: (bucket: string) => boolean,
   emptySnapshot = false,
+  options: {
+    removedPaths?: (paths: string[]) => string[]
+    queueAckError?: boolean
+    storageGate?: Promise<void>
+  } = {},
 ) {
   const queue = [...initialRows]
   const calls: Array<{ bucket: string; paths: string[] }> = []
@@ -40,6 +45,7 @@ function mutationClient(
         delete: vi.fn(() => ({
           eq: vi.fn((_column: string, owner: string) => ({
             in: vi.fn(async (_key: string, ids: number[]) => {
+              if (options.queueAckError) return { data: null, error: new Error('queue unavailable') }
               for (const id of ids) {
                 const index = queue.findIndex((row) => row.owner_id === owner && row.id === id)
                 if (index >= 0) queue.splice(index, 1)
@@ -53,9 +59,10 @@ function mutationClient(
     storage: { from: vi.fn((bucket: string) => ({
       remove: vi.fn(async (paths: string[]) => {
         calls.push({ bucket, paths })
+        await options.storageGate
         return removeFailure?.(bucket)
           ? { data: null, error: new Error('storage unavailable') }
-          : { data: paths.map((name) => ({ name })), error: null }
+          : { data: (options.removedPaths?.(paths) ?? paths).map((name) => ({ name })), error: null }
       }),
     })) },
   }
@@ -321,6 +328,43 @@ describe('SupabaseLibraryRepository', () => {
     expect(queue.map((row) => row.id)).toEqual([2])
   })
 
+  it('retains all cleanup tasks when Storage returns no confirmed paths', async () => {
+    const { client, queue } = mutationClient([
+      { id: 1, owner_id: 'user-1', bucket: 'game-ui-originals', path: 'user-1/game-1/a/original.png' },
+    ], undefined, false, { removedPaths: () => [] })
+    const repository = new SupabaseLibraryRepository(client as never)
+
+    const result = await repository.deleteImages(['image-a'])
+
+    expect(result).toMatchObject({ status: 'partial', pendingCleanup: 1 })
+    expect(queue.map((row) => row.id)).toEqual([1])
+  })
+
+  it('acknowledges only the paths explicitly returned by Storage', async () => {
+    const { client, queue } = mutationClient([
+      { id: 1, owner_id: 'user-1', bucket: 'game-ui-originals', path: 'user-1/game-1/a/original.png' },
+      { id: 2, owner_id: 'user-1', bucket: 'game-ui-originals', path: 'user-1/game-1/b/original.png' },
+    ], undefined, false, { removedPaths: (paths) => [paths[0]] })
+    const repository = new SupabaseLibraryRepository(client as never)
+
+    const result = await repository.deleteImages(['image-a', 'image-b'])
+
+    expect(result).toMatchObject({ status: 'partial', pendingCleanup: 1 })
+    expect(queue.map((row) => row.id)).toEqual([2])
+  })
+
+  it('retains confirmed Storage paths when queue acknowledgement fails', async () => {
+    const { client, queue } = mutationClient([
+      { id: 1, owner_id: 'user-1', bucket: 'game-ui-originals', path: 'user-1/game-1/a/original.png' },
+    ], undefined, false, { queueAckError: true })
+    const repository = new SupabaseLibraryRepository(client as never)
+
+    const result = await repository.deleteImages(['image-a'])
+
+    expect(result).toMatchObject({ status: 'partial', pendingCleanup: 1 })
+    expect(queue.map((row) => row.id)).toEqual([1])
+  })
+
   it('does not call the delete RPC for an empty selection', async () => {
     const { client, rpc, calls } = mutationClient()
     const repository = new SupabaseLibraryRepository(client as never)
@@ -356,5 +400,31 @@ describe('SupabaseLibraryRepository', () => {
     expect(snapshot).toEqual({ games: [], modules: [], images: [], captureSets: [] })
     expect(calls).toEqual([{ bucket: 'game-ui-originals', paths: ['user-1/game-1/a/original.png'] }])
     expect(queue).toHaveLength(1)
+  })
+
+  it('returns snapshots while one background cleanup is still pending', async () => {
+    let releaseStorage!: () => void
+    const storageGate = new Promise<void>((resolve) => { releaseStorage = resolve })
+    const { client, calls, queue } = mutationClient([
+      { id: 1, owner_id: 'user-1', bucket: 'game-ui-originals', path: 'user-1/game-1/a/original.png' },
+    ], undefined, true, { storageGate })
+    const repository = new SupabaseLibraryRepository(client as never)
+    const snapshots = [repository.getSnapshot(), repository.getSnapshot()]
+    let timer: ReturnType<typeof setTimeout> | undefined
+
+    try {
+      await vi.waitFor(() => expect(calls.length).toBeGreaterThan(0))
+      const result = await Promise.race([
+        Promise.all(snapshots).then(() => 'resolved'),
+        new Promise<string>((resolve) => { timer = setTimeout(() => resolve('blocked'), 100) }),
+      ])
+      expect(result).toBe('resolved')
+      expect(calls).toHaveLength(1)
+    } finally {
+      if (timer) clearTimeout(timer)
+      releaseStorage()
+      await Promise.allSettled(snapshots)
+      await vi.waitFor(() => expect(queue).toHaveLength(0))
+    }
   })
 })
