@@ -37,7 +37,8 @@ export interface UploadBatchResult {
 }
 
 export interface MutationResult {
-  status: 'complete' | 'unavailable'
+  status: 'complete' | 'partial' | 'unavailable'
+  pendingCleanup?: number
   message?: string
 }
 
@@ -60,5 +61,8 @@ export interface LibraryRepository {
   submitImport(draft: ImportSubmission): Promise<UploadBatchResult>
   updateModule?(moduleId: string, update: ModuleUpdate): Promise<MutationResult>
   updateImageMetadata?(imageId: string, update: ImageMetadataUpdate): Promise<MutationResult>
+  moveImage?(imageId: string, targetModuleId: string): Promise<MutationResult>
+  deleteImages?(imageIds: string[]): Promise<MutationResult>
+  deleteGame?(gameId: string): Promise<MutationResult>
   signOut?(): Promise<void>
 }

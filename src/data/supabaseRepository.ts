@@ -16,8 +16,11 @@ const THUMBNAILS_BUCKET = 'game-ui-thumbnails'
 // A gallery can stay open during a full design session. One-day signed URLs
 // avoid broken thumbnails/downloads without making either bucket public.
 const SIGNED_URL_SECONDS = 24 * 60 * 60
+const CLEANUP_PAGE_SIZE = 500
+const STORAGE_REMOVE_CHUNK_SIZE = 100
 
 type Row = Record<string, unknown>
+interface CleanupRow { id: number; bucket: string; path: string }
 
 function text(value: unknown, fallback = ''): string {
   return typeof value === 'string' ? value : fallback
@@ -91,8 +94,67 @@ export class SupabaseLibraryRepository implements LibraryRepository {
     return data.signedUrl
   }
 
+  private async drainCleanupQueue(ownerId: string): Promise<number> {
+    let pending = 0
+    let afterId = 0
+
+    while (true) {
+      const { data, error } = await this.client.from('storage_cleanup_queue')
+        .select('id,bucket,path')
+        .eq('owner_id', ownerId)
+        .gt('id', afterId)
+        .order('id', { ascending: true })
+        .limit(CLEANUP_PAGE_SIZE)
+      if (error) throw error
+      const rows = (data ?? []) as CleanupRow[]
+      if (!rows.length) break
+      afterId = rows[rows.length - 1].id
+
+      for (const bucket of [ORIGINALS_BUCKET, THUMBNAILS_BUCKET]) {
+        const bucketRows = rows.filter((row) => row.bucket === bucket)
+        for (let start = 0; start < bucketRows.length; start += STORAGE_REMOVE_CHUNK_SIZE) {
+          const chunk = bucketRows.slice(start, start + STORAGE_REMOVE_CHUNK_SIZE)
+          try {
+            const { data: removed, error: removeError } = await this.client.storage.from(bucket).remove(chunk.map((row) => row.path))
+            if (removeError) throw removeError
+            const returnedPaths = new Set((removed ?? []).map((item) => item.name))
+            const confirmed = returnedPaths.size
+              ? chunk.filter((row) => returnedPaths.has(row.path))
+              : chunk
+            if (confirmed.length) {
+              const { error: queueError } = await this.client.from('storage_cleanup_queue')
+                .delete()
+                .eq('owner_id', ownerId)
+                .in('id', confirmed.map((row) => row.id))
+              if (queueError) throw queueError
+            }
+            pending += chunk.length - confirmed.length
+          } catch {
+            pending += chunk.length
+          }
+        }
+      }
+      pending += rows.filter((row) => row.bucket !== ORIGINALS_BUCKET && row.bucket !== THUMBNAILS_BUCKET).length
+      if (rows.length < CLEANUP_PAGE_SIZE) break
+    }
+
+    return pending
+  }
+
+  private async cleanupResult(ownerId: string): Promise<MutationResult> {
+    try {
+      const pendingCleanup = await this.drainCleanupQueue(ownerId)
+      return pendingCleanup
+        ? { status: 'partial', pendingCleanup, message: '资料已删除，部分文件仍待清理，将在下次加载时重试' }
+        : { status: 'complete', pendingCleanup: 0 }
+    } catch {
+      return { status: 'partial', message: '资料已删除，文件清理将在下次加载时重试' }
+    }
+  }
+
   async getSnapshot(): Promise<LibrarySnapshot> {
-    await this.userId()
+    const ownerId = await this.userId()
+    try { await this.drainCleanupQueue(ownerId) } catch { /* Cleanup must not prevent reading the library. */ }
     const [gameRows, captureRows, moduleRows, imageRows] = await Promise.all([
       this.rows('games'),
       this.rows('capture_sets'),
@@ -350,5 +412,30 @@ export class SupabaseLibraryRepository implements LibraryRepository {
     if (error) throw error
 
     return { status: 'complete' }
+  }
+
+  async moveImage(imageId: string, targetModuleId: string): Promise<MutationResult> {
+    await this.userId()
+    const { error } = await this.client.rpc('move_ui_image_to_module', {
+      p_image_id: imageId,
+      p_target_module_id: targetModuleId,
+    })
+    if (error) throw error
+    return { status: 'complete' }
+  }
+
+  async deleteImages(imageIds: string[]): Promise<MutationResult> {
+    if (!imageIds.length) return { status: 'complete', pendingCleanup: 0 }
+    const ownerId = await this.userId()
+    const { error } = await this.client.rpc('delete_ui_images', { p_image_ids: imageIds })
+    if (error) throw error
+    return this.cleanupResult(ownerId)
+  }
+
+  async deleteGame(gameId: string): Promise<MutationResult> {
+    const ownerId = await this.userId()
+    const { error } = await this.client.rpc('delete_game', { p_game_id: gameId })
+    if (error) throw error
+    return this.cleanupResult(ownerId)
   }
 }

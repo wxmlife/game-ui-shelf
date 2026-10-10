@@ -7,6 +7,61 @@ function session(userId = 'user-1') {
   return { data: { session: { user: { id: userId } } }, error: null }
 }
 
+interface CleanupRow { id: number; owner_id: string; bucket: string; path: string }
+
+function mutationClient(
+  initialRows: CleanupRow[] = [],
+  removeFailure?: (bucket: string) => boolean,
+  emptySnapshot = false,
+) {
+  const queue = [...initialRows]
+  const calls: Array<{ bucket: string; paths: string[] }> = []
+  const rpc = vi.fn().mockResolvedValue({ data: null, error: null })
+  const client = {
+    auth: { getSession: vi.fn().mockResolvedValue(session()) },
+    rpc,
+    from: vi.fn((table: string) => {
+      if (table !== 'storage_cleanup_queue') {
+        if (emptySnapshot) return { select: vi.fn().mockResolvedValue({ data: [], error: null }) }
+        throw new Error(`Unexpected table ${table}`)
+      }
+      return {
+        select: vi.fn(() => ({
+          eq: vi.fn((_column: string, owner: string) => ({
+            gt: vi.fn((_column: string, after: number) => ({
+              order: vi.fn(() => ({
+                limit: vi.fn(async (count: number) => ({
+                  data: queue.filter((row) => row.owner_id === owner && row.id > after).slice(0, count), error: null,
+                })),
+              })),
+            })),
+          })),
+        })),
+        delete: vi.fn(() => ({
+          eq: vi.fn((_column: string, owner: string) => ({
+            in: vi.fn(async (_key: string, ids: number[]) => {
+              for (const id of ids) {
+                const index = queue.findIndex((row) => row.owner_id === owner && row.id === id)
+                if (index >= 0) queue.splice(index, 1)
+              }
+              return { data: null, error: null }
+            }),
+          })),
+        })),
+      }
+    }),
+    storage: { from: vi.fn((bucket: string) => ({
+      remove: vi.fn(async (paths: string[]) => {
+        calls.push({ bucket, paths })
+        return removeFailure?.(bucket)
+          ? { data: null, error: new Error('storage unavailable') }
+          : { data: paths.map((name) => ({ name })), error: null }
+      }),
+    })) },
+  }
+  return { client, rpc, queue, calls }
+}
+
 describe('SupabaseLibraryRepository', () => {
   it('refuses to read private data without an authenticated session', async () => {
     const client = {
@@ -208,5 +263,98 @@ describe('SupabaseLibraryRepository', () => {
       p_search_text: '奖励领取成功 领取奖励 奖励 反馈',
       p_tags: ['奖励', '反馈'],
     })
+  })
+
+  it('moves an image through one atomic RPC without touching Storage', async () => {
+    const { client, rpc, calls } = mutationClient()
+    const repository = new SupabaseLibraryRepository(client as never)
+
+    const result = await repository.moveImage('image-1', 'module-2')
+
+    expect(result.status).toBe('complete')
+    expect(rpc).toHaveBeenCalledExactlyOnceWith('move_ui_image_to_module', {
+      p_image_id: 'image-1', p_target_module_id: 'module-2',
+    })
+    expect(calls).toEqual([])
+  })
+
+  it('deletes a single image with one transactional RPC', async () => {
+    const { client, rpc } = mutationClient()
+    const repository = new SupabaseLibraryRepository(client as never)
+
+    const result = await repository.deleteImages(['image-1'])
+
+    expect(result.status).toBe('complete')
+    expect(rpc).toHaveBeenCalledExactlyOnceWith('delete_ui_images', { p_image_ids: ['image-1'] })
+  })
+
+  it('deletes a cross-module batch in one transaction and groups Storage cleanup by bucket', async () => {
+    const { client, rpc, queue, calls } = mutationClient([
+      { id: 1, owner_id: 'user-1', bucket: 'game-ui-originals', path: 'user-1/game-1/a/original.png' },
+      { id: 2, owner_id: 'user-1', bucket: 'game-ui-thumbnails', path: 'user-1/game-1/a/thumb.webp' },
+      { id: 3, owner_id: 'user-1', bucket: 'game-ui-originals', path: 'user-1/game-1/b/original.png' },
+    ])
+    const repository = new SupabaseLibraryRepository(client as never)
+
+    const result = await repository.deleteImages(['image-a', 'image-b'])
+
+    expect(result).toMatchObject({ status: 'complete', pendingCleanup: 0 })
+    expect(rpc).toHaveBeenCalledExactlyOnceWith('delete_ui_images', { p_image_ids: ['image-a', 'image-b'] })
+    expect(calls).toEqual([
+      { bucket: 'game-ui-originals', paths: ['user-1/game-1/a/original.png', 'user-1/game-1/b/original.png'] },
+      { bucket: 'game-ui-thumbnails', paths: ['user-1/game-1/a/thumb.webp'] },
+    ])
+    expect(queue).toEqual([])
+  })
+
+  it('keeps failed Storage objects queued after metadata deletion', async () => {
+    const { client, rpc, queue } = mutationClient([
+      { id: 1, owner_id: 'user-1', bucket: 'game-ui-originals', path: 'user-1/game-1/a/original.png' },
+      { id: 2, owner_id: 'user-1', bucket: 'game-ui-thumbnails', path: 'user-1/game-1/a/thumb.webp' },
+    ], (bucket) => bucket === 'game-ui-thumbnails')
+    const repository = new SupabaseLibraryRepository(client as never)
+
+    const result = await repository.deleteImages(['image-a'])
+
+    expect(rpc).toHaveBeenCalledOnce()
+    expect(result).toMatchObject({ status: 'partial', pendingCleanup: 1 })
+    expect(queue.map((row) => row.id)).toEqual([2])
+  })
+
+  it('does not call the delete RPC for an empty selection', async () => {
+    const { client, rpc, calls } = mutationClient()
+    const repository = new SupabaseLibraryRepository(client as never)
+
+    const result = await repository.deleteImages([])
+
+    expect(result.status).toBe('complete')
+    expect(rpc).not.toHaveBeenCalled()
+    expect(calls).toEqual([])
+  })
+
+  it('deletes a game through one transactional RPC and cleans its cover', async () => {
+    const { client, rpc, queue } = mutationClient([
+      { id: 1, owner_id: 'user-1', bucket: 'game-ui-thumbnails', path: 'user-1/game-1/cover.webp' },
+    ])
+    const repository = new SupabaseLibraryRepository(client as never)
+
+    const result = await repository.deleteGame('game-1')
+
+    expect(result.status).toBe('complete')
+    expect(rpc).toHaveBeenCalledExactlyOnceWith('delete_game', { p_game_id: 'game-1' })
+    expect(queue).toEqual([])
+  })
+
+  it('still loads a snapshot when queued Storage cleanup fails', async () => {
+    const { client, calls, queue } = mutationClient([
+      { id: 1, owner_id: 'user-1', bucket: 'game-ui-originals', path: 'user-1/game-1/a/original.png' },
+    ], () => true, true)
+    const repository = new SupabaseLibraryRepository(client as never)
+
+    const snapshot = await repository.getSnapshot()
+
+    expect(snapshot).toEqual({ games: [], modules: [], images: [], captureSets: [] })
+    expect(calls).toEqual([{ bucket: 'game-ui-originals', paths: ['user-1/game-1/a/original.png'] }])
+    expect(queue).toHaveLength(1)
   })
 })
