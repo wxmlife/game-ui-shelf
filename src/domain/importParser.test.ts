@@ -17,7 +17,7 @@ describe('parseImportFile', () => {
       moduleName: '首页',
       title: '首页',
       steps: [],
-      sequenceOrder: 4,
+      sequenceOrder: 5,
       originalFilename: 'home首页.png',
       valid: true,
     })
@@ -35,7 +35,8 @@ describe('parseImportFile', () => {
     expect(result.moduleName).toBe('奖励')
     expect(result.title).toBe('奖励详情')
     expect(result.steps).toEqual(['奖励详情'])
-    expect(result.sequenceOrder).toBe(1)
+    expect(result.flowName).toBe('奖励')
+    expect(result.sequenceOrder).toBe(2)
   })
 
   it('uses an optional numeric prefix as the explicit sequence order', () => {
@@ -48,7 +49,69 @@ describe('parseImportFile', () => {
 
     expect(result.moduleKey).toBe('reward')
     expect(result.title).toBe('奖励领取')
+    expect(result.flowName).toBe('奖励')
     expect(result.sequenceOrder).toBe(2)
+  })
+
+  it('parses a Chinese module and title without an explicit order', () => {
+    const result = parseImportFile({
+      relativePath: 'IDOL/公会_总部已解锁.jpg',
+      fileName: '公会_总部已解锁.jpg',
+      mimeType: 'image/jpeg',
+      sourceIndex: 0,
+    })
+
+    expect(result).toMatchObject({
+      moduleKey: '公会',
+      moduleName: '公会',
+      title: '总部已解锁',
+      flowName: '总部已解锁',
+      sequenceOrder: 1,
+      originalFilename: '公会_总部已解锁.jpg',
+      valid: true,
+    })
+  })
+
+  it('uses only a final numeric underscore segment as the explicit order', () => {
+    const result = parseImportFile({
+      relativePath: 'IDOL/公会_兑换商店界面_2.jpg',
+      fileName: '公会_兑换商店界面_2.jpg',
+      mimeType: 'image/jpeg',
+      sourceIndex: 8,
+    })
+
+    expect(result).toMatchObject({
+      moduleName: '公会',
+      title: '兑换商店界面',
+      flowName: '兑换商店界面',
+      sequenceOrder: 2,
+    })
+  })
+
+  it('keeps internal underscores in the title and only removes a final order', () => {
+    const result = parseImportFile({
+      relativePath: 'IDOL/公会_商店_兑换_3_预览.jpg',
+      fileName: '公会_商店_兑换_3_预览.jpg',
+      mimeType: 'image/jpeg',
+      sourceIndex: 2,
+    })
+
+    expect(result.title).toBe('商店_兑换_3_预览')
+    expect(result.flowName).toBe('商店_兑换_3_预览')
+    expect(result.sequenceOrder).toBe(3)
+  })
+
+  it('keeps internal underscores when the final segment is an order', () => {
+    const result = parseImportFile({
+      relativePath: 'IDOL/公会_商店_兑换_3.jpg',
+      fileName: '公会_商店_兑换_3.jpg',
+      mimeType: 'image/jpeg',
+      sourceIndex: 8,
+    })
+
+    expect(result.title).toBe('商店_兑换')
+    expect(result.flowName).toBe('商店_兑换')
+    expect(result.sequenceOrder).toBe(3)
   })
 
   it('keeps the first folder as the game when files are nested', () => {

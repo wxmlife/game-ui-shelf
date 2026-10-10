@@ -107,6 +107,7 @@ export interface ParsedImportFile {
   gameName: string
   moduleKey: string
   moduleName: string
+  flowName: string
   title: string
   steps: string[]
   sequenceOrder: number

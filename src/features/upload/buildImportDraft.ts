@@ -1,5 +1,6 @@
 import type { ImportIssue } from '../../domain/models'
 import { parseImportFile } from '../../domain/importParser'
+import { deriveAutoTags } from './deriveAutoTags'
 import type { UploadDraft, UploadDraftFile } from './uploadTypes'
 
 export const MAX_UPLOAD_BYTES = 25 * 1024 * 1024
@@ -49,9 +50,9 @@ export function buildImportDraft(
       gameName: parsed.gameName,
       moduleKey: parsed.moduleKey,
       moduleName: parsed.moduleName,
-      flowName: parsed.steps.length ? (parsed.steps.length > 1 ? parsed.steps[0] : parsed.moduleName) : '',
+      flowName: parsed.flowName,
       title: parsed.title,
-      tags: [],
+      tags: deriveAutoTags(parsed.moduleName, parsed.title),
       sequenceOrder: parsed.sequenceOrder,
       originalFilename: parsed.originalFilename,
       status: issues.length ? 'rejected' : 'ready',

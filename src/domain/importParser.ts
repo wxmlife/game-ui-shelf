@@ -48,12 +48,34 @@ export function parseImportFile(input: ImportFileInput): ParsedImportFile {
   const cleanStem = orderMatch
     ? originalStem.slice(orderMatch[0].length).trim()
     : originalStem.trim()
-  const segments = cleanStem
-    .split('-')
-    .map((part) => part.trim())
-    .filter(Boolean)
-  const module = parseModule(segments[0] ?? '')
-  const steps = segments.slice(1)
+  const firstUnderscore = cleanStem.indexOf('_')
+  const firstHyphen = cleanStem.indexOf('-')
+  const usesUnderscoreFormat = firstUnderscore >= 0 && (firstHyphen < 0 || firstUnderscore < firstHyphen)
+  let module: ReturnType<typeof parseModule>
+  let steps: string[]
+  let title: string
+  let flowName: string
+  let underscoreOrder: number | undefined
+
+  if (usesUnderscoreFormat) {
+    module = parseModule(cleanStem.slice(0, firstUnderscore))
+    const titleParts = cleanStem.slice(firstUnderscore + 1).split('_')
+    if (/^\d+$/.test(titleParts.at(-1) ?? '')) {
+      underscoreOrder = Number.parseInt(titleParts.pop()!, 10)
+    }
+    title = titleParts.join('_').trim() || module.name
+    flowName = title
+    steps = [title]
+  } else {
+    const segments = cleanStem
+      .split('-')
+      .map((part) => part.trim())
+      .filter(Boolean)
+    module = parseModule(segments[0] ?? '')
+    steps = segments.slice(1)
+    title = steps.at(-1) || module.name
+    flowName = steps.length ? (steps.length > 1 ? steps[0] : module.name) : ''
+  }
   const issues: ImportIssue[] = []
 
   if (!SUPPORTED_EXTENSIONS.has(extension)) {
@@ -81,11 +103,12 @@ export function parseImportFile(input: ImportFileInput): ParsedImportFile {
     gameName,
     moduleKey: module.key,
     moduleName: module.name,
-    title: steps.at(-1) || module.name,
+    flowName,
+    title,
     steps,
     sequenceOrder: orderMatch
       ? Number.parseInt(orderMatch[1], 10)
-      : (input.sourceIndex ?? 0),
+      : (underscoreOrder ?? ((input.sourceIndex ?? 0) + 1)),
     originalFilename,
     relativePath: input.relativePath,
     extension,

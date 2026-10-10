@@ -51,6 +51,8 @@ describe('UploadPage', () => {
     await user.clear(title)
     await user.type(title, '首领奖励详情')
     const tags = screen.getByLabelText('标签 reward奖励-奖励详情.png')
+    expect(tags).toHaveValue('奖励, 详情')
+    await user.clear(tags)
     await user.type(tags, '弹窗, 金币')
     await user.click(screen.getByRole('button', { name: '上传 1 张图片' }))
 

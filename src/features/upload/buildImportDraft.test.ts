@@ -27,6 +27,7 @@ describe('buildImportDraft', () => {
       moduleName: '奖励',
       flowName: '奖励',
       title: '奖励详情',
+      tags: ['奖励', '详情'],
       status: 'ready',
     })
   })
@@ -40,9 +41,23 @@ describe('buildImportDraft', () => {
 
     expect(draft.files.map((file) => [file.originalFilename, file.sequenceOrder])).toEqual([
       ['03-reward奖励-领取.png', 3],
-      ['home首页.png', 1],
+      ['home首页.png', 2],
       ['01-reward奖励-入口.png', 1],
     ])
+  })
+
+  it('populates editable draft fields from an underscore filename', () => {
+    const draft = buildImportDraft([folderFile('IDOL/公会_兑换商店界面_2.jpg')])
+
+    expect(draft.files[0]).toMatchObject({
+      moduleKey: '公会',
+      moduleName: '公会',
+      flowName: '兑换商店界面',
+      title: '兑换商店界面',
+      sequenceOrder: 2,
+      tags: ['公会', '兑换', '商店'],
+      status: 'ready',
+    })
   })
 
   it('reports unsupported, duplicate, and over-limit files before upload', () => {
