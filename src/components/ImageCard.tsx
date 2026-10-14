@@ -22,7 +22,7 @@ export function ImageCard({ image, onOpen, selected, busy, onSelect, onMove, onD
           onDragStart={(event) => { event.dataTransfer.setData('application/x-ui-image', image.id); event.dataTransfer.effectAllowed = 'move'; onDragImage?.(image.id) }}
           onDragEnd={() => onDragImage?.(null)}><GripVertical size={16} /> 移动</button>}
       </div>}
-      <button type="button" className="image-card-preview" onClick={() => onOpen(image)} aria-label={`查看 ${image.title}`}>
+      <button type="button" className="image-card-preview" disabled={busy} onClick={() => onOpen(image)} aria-label={`查看 ${image.title}`}>
         <img src={image.thumbnailUrl} alt="" loading="lazy" draggable={false} />
         <span className="image-card-zoom"><Maximize2 size={17} /> 查看大图</span>
         <span className="sequence-index">{String(image.sequenceOrder).padStart(2, '0')}</span>

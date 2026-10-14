@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -40,7 +40,107 @@ function managementFixture() {
   return { snapshot, repository }
 }
 
+function twoGameFixture() {
+  const fixture = managementFixture()
+  fixture.snapshot.games.push({ ...fixture.snapshot.games[0], id: 'game-b', name: '另一游戏' })
+  fixture.snapshot.modules.push({ ...fixture.snapshot.modules[0], id: 'module-b', gameId: 'game-b', name: '另一模块' })
+  fixture.snapshot.images.push({ ...fixture.snapshot.images[0], id: 'image-b', gameId: 'game-b', moduleId: 'module-b', title: '另一图片' })
+  return fixture
+}
+
 describe('game image management', () => {
+  it.each(['drag', 'dialog'] as const)('locks stale cards and metadata while a %s move is pending, then restores editing', async (method) => {
+    const user = userEvent.setup()
+    const { repository, snapshot } = managementFixture()
+    let finishMove!: () => void
+    repository.moveImage = vi.fn(() => new Promise<MutationResult>((resolve) => {
+      finishMove = () => { snapshot.images[0].moduleId = 'module-2'; resolve({ status: 'complete' }) }
+    }))
+    repository.updateModule = vi.fn(async () => ({ status: 'complete' as const }))
+    repository.updateImageMetadata = vi.fn(async () => ({ status: 'complete' as const }))
+    render(<App repository={repository} />)
+    const handle = await screen.findByRole('button', { name: '移动 图片甲 到模块' })
+    if (method === 'dialog') {
+      await user.click(handle)
+      await user.selectOptions(screen.getByRole('combobox'), 'module-2')
+      await user.click(screen.getByRole('button', { name: '确认移动' }))
+    } else {
+      const dataTransfer = { setData: vi.fn(), effectAllowed: '' }
+      fireEvent.dragStart(handle, { dataTransfer })
+      fireEvent.drop(screen.getByRole('region', { name: '空模块' }), { dataTransfer })
+    }
+    const preview = screen.getByRole('button', { name: '查看 图片甲' })
+    expect(preview).toBeDisabled()
+    expect(screen.getByRole('button', { name: '编辑 源模块模块' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '删除游戏' })).toBeDisabled()
+    await user.click(preview)
+    expect(screen.queryByRole('dialog', { name: '图片甲' })).not.toBeInTheDocument()
+    expect(repository.updateImageMetadata).not.toHaveBeenCalled()
+    await act(async () => finishMove())
+    await user.click(await screen.findByRole('button', { name: '查看 图片甲' }))
+    await user.click(screen.getByRole('button', { name: '编辑图片资料' }))
+    await user.click(screen.getByRole('button', { name: '保存图片资料' }))
+    await waitFor(() => expect(repository.updateImageMetadata).toHaveBeenCalledWith('image-0', expect.objectContaining({ moduleId: 'module-2' })))
+  })
+
+  it('shares the mutation lock with metadata saving and releases it after failure', async () => {
+    const user = userEvent.setup()
+    const { repository } = managementFixture()
+    let failSave!: (error: Error) => void
+    repository.updateImageMetadata = vi.fn(() => new Promise<MutationResult>((_resolve, reject) => { failSave = reject }))
+    render(<App repository={repository} />)
+    await user.click(await screen.findByRole('button', { name: '查看 图片甲' }))
+    await user.click(screen.getByRole('button', { name: '编辑图片资料' }))
+    await user.click(screen.getByRole('button', { name: '保存图片资料' }))
+    expect(screen.getByRole('button', { name: '移动 图片甲 到模块' })).toBeDisabled()
+    await user.click(screen.getByRole('button', { name: '移动 图片甲 到模块' }))
+    expect(repository.moveImage).not.toHaveBeenCalled()
+    await act(async () => failSave(new Error('保存失败')))
+    expect(await screen.findByRole('alert')).toHaveTextContent('保存失败')
+    expect(screen.getByRole('button', { name: '保存图片资料' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: '移动 图片甲 到模块' })).toBeEnabled()
+  })
+
+  it.each(['selection', 'deletion', 'move', 'viewer'] as const)('clears %s state when navigating directly to another game', async (state) => {
+    const user = userEvent.setup()
+    const { repository } = twoGameFixture()
+    render(<App repository={repository} />)
+    await user.click(await screen.findByRole('checkbox', { name: '选择 图片甲' }))
+    if (state === 'deletion') await user.click(screen.getByRole('button', { name: '删除已选' }))
+    if (state === 'move') await user.click(screen.getByRole('button', { name: '移动 图片甲 到模块' }))
+    if (state === 'viewer') await user.click(screen.getByRole('button', { name: '查看 图片甲' }))
+    await act(async () => { window.location.hash = '#/game/game-b' })
+    await screen.findByRole('heading', { name: '另一游戏' })
+    expect(screen.queryByRole('toolbar', { name: '图片批量管理' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+    await user.click(screen.getByRole('checkbox', { name: '选择 另一图片' }))
+    await user.click(screen.getByRole('button', { name: '删除已选' }))
+    await user.click(screen.getByRole('button', { name: '确认删除' }))
+    await waitFor(() => expect(repository.deleteImages).toHaveBeenCalledWith(['image-b']))
+    expect(repository.deleteImages).toHaveBeenCalledTimes(1)
+  })
+
+  it.each(['complete', 'reject'] as const)('ignores an old game request that finishes with %s after navigation', async (outcome) => {
+    const user = userEvent.setup()
+    const { repository } = twoGameFixture()
+    let finish!: () => void
+    repository.moveImage = vi.fn(() => new Promise<MutationResult>((resolve, reject) => {
+      finish = () => outcome === 'complete' ? resolve({ status: 'complete' }) : reject(new Error('旧游戏移动失败'))
+    }))
+    render(<App repository={repository} />)
+    await user.click(await screen.findByRole('button', { name: '移动 图片甲 到模块' }))
+    await user.selectOptions(screen.getByRole('combobox'), 'module-2')
+    await user.click(screen.getByRole('button', { name: '确认移动' }))
+    await act(async () => { window.location.hash = '#/game/game-b' })
+    await screen.findByRole('heading', { name: '另一游戏' })
+    await user.click(screen.getByRole('button', { name: '移动 另一图片 到模块' }))
+    expect(screen.getByRole('dialog', { name: '移动到模块' })).toHaveTextContent('另一图片')
+    await act(async () => finish())
+    expect(screen.getByRole('dialog', { name: '移动到模块' })).toHaveTextContent('另一图片')
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
   it('preserves named demo flows separately from images without a flow', async () => {
     const user = userEvent.setup()
     window.location.hash = '#/game/idol-empire'

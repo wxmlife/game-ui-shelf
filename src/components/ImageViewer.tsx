@@ -68,7 +68,7 @@ export function ImageViewer({ images, initialImageId, onClose, onSaveMetadata, o
   }, [image?.id])
 
   function beginEditing() {
-    if (!image) return
+    if (!image || suspended) return
     setTitle(image.title)
     setFlowName(image.flowName ?? '')
     setSequenceOrder(String(image.sequenceOrder))
@@ -78,7 +78,7 @@ export function ImageViewer({ images, initialImageId, onClose, onSaveMetadata, o
   }
 
   async function saveMetadata() {
-    if (!image || !onSaveMetadata || !title.trim()) return
+    if (!image || !onSaveMetadata || !title.trim() || suspended || saving) return
     setSaving(true)
     setSaveError(null)
     try {
@@ -131,7 +131,7 @@ export function ImageViewer({ images, initialImageId, onClose, onSaveMetadata, o
             {saveError && <div className="editor-error" role="alert">{saveError}</div>}
             <div className="viewer-editor-actions">
               <button className="secondary-button" type="button" onClick={() => setEditing(false)}>取消</button>
-              <button className="primary-button" type="button" disabled={saving || !title.trim()} onClick={() => void saveMetadata()}>
+              <button className="primary-button" type="button" disabled={suspended || saving || !title.trim()} onClick={() => void saveMetadata()}>
                 {saving && <LoaderCircle className="spin" size={15} />}
                 {saving ? '保存中…' : '保存图片资料'}
               </button>
@@ -151,8 +151,8 @@ export function ImageViewer({ images, initialImageId, onClose, onSaveMetadata, o
             <div className="tag-row">
               {image.tags.map((tag) => <span className="tag" key={tag}>#{tag}</span>)}
             </div>
-            {onSaveMetadata && <button className="viewer-edit-button" type="button" onClick={beginEditing}><Pencil size={15} /> 编辑图片资料</button>}
-            {onDelete && <button className="viewer-edit-button danger-text" type="button" onClick={() => onDelete(image)}><Trash2 size={15} /> 删除图片</button>}
+            {onSaveMetadata && <button className="viewer-edit-button" type="button" disabled={suspended} onClick={beginEditing}><Pencil size={15} /> 编辑图片资料</button>}
+            {onDelete && <button className="viewer-edit-button danger-text" type="button" disabled={suspended} onClick={() => onDelete(image)}><Trash2 size={15} /> 删除图片</button>}
           </>
         )}
         <a className="secondary-button viewer-download" href={image.downloadUrl || image.imageUrl} download={image.originalFilename}>

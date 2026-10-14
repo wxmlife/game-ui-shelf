@@ -1,5 +1,5 @@
 import { ArrowLeft, CalendarDays, Gamepad2, Image as ImageIcon, Pencil, Upload } from 'lucide-react'
-import { type CSSProperties, useMemo, useRef, useState } from 'react'
+import { type CSSProperties, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 
 import { useLibrary } from '../app/LibraryContext'
@@ -31,15 +31,24 @@ function mutationWarning(result: MutationResult) {
 
 export function GamePage() {
   const { gameId } = useParams()
+  return <GameDetails key={gameId} gameId={gameId} />
+}
+
+function GameDetails({ gameId }: { gameId: string | undefined }) {
   const navigate = useNavigate()
   const { snapshot, loading, error, repository, refresh } = useLibrary()
   const [selectedImage, setSelectedImage] = useState<UiImage | null>(null)
   const [editingModule, setEditingModule] = useState<GameModule | null>(null)
   const [movingImage, setMovingImage] = useState<UiImage | null>(null)
   const [selectedIds, setSelectedIds] = useState<string[]>([])
-  const [deletion, setDeletion] = useState<{ kind: 'images'; ids: string[] } | { kind: 'game' } | null>(null)
+  const [deletion, setDeletion] = useState<{ kind: 'images'; gameId: string; ids: string[] } | { kind: 'game'; gameId: string } | null>(null)
   const [busy, setBusy] = useState(false)
   const busyRef = useRef(false)
+  const active = useRef(true)
+  useEffect(() => {
+    active.current = true
+    return () => { active.current = false }
+  }, [])
   const [mutationError, setMutationError] = useState<string | null>(null)
   const [warning, setWarning] = useState<string | null>(null)
   const [draggingId, setDraggingId] = useState<string | null>(null)
@@ -58,40 +67,46 @@ export function GamePage() {
     [snapshot, gameId],
   )
 
-  async function mutate(action: () => Promise<MutationResult>, onSuccess: (result: MutationResult) => void) {
-    if (busyRef.current) return
+  async function mutate(action: () => Promise<MutationResult>, onSuccess: (result: MutationResult) => void, reportToEditor = false) {
+    if (!active.current || busyRef.current) {
+      if (reportToEditor) throw new Error('操作进行中，请稍后重试')
+      return
+    }
     busyRef.current = true
     setBusy(true)
     setMutationError(null)
     setWarning(null)
     try {
       const result = await action()
+      if (!active.current) return
       if (result.status === 'unavailable') throw new Error(result.message || '当前无法执行此操作')
       setWarning(mutationWarning(result))
       onSuccess(result)
       await refresh()
     } catch (caught) {
+      if (!active.current) return
+      if (reportToEditor) throw caught
       setMutationError(caught instanceof Error ? caught.message : '操作失败，请重试')
     } finally {
       busyRef.current = false
-      setBusy(false)
+      if (active.current) setBusy(false)
     }
   }
 
   async function moveImage(image: UiImage, targetModuleId: string) {
-    if (!canMove || !repository.moveImage || busyRef.current) return
+    if (!canMove || !repository.moveImage || busyRef.current || image.gameId !== gameId || !modules.some((module) => module.id === targetModuleId)) return
     if (image.moduleId === targetModuleId) { setMovingImage(null); return }
     await mutate(() => repository.moveImage!(image.id, targetModuleId), () => setMovingImage(null))
   }
 
   function requestDeletion(ids: string[]) {
-    if (busyRef.current || !ids.length) return
+    if (busyRef.current || !game || !ids.length || !ids.every((id) => gameImages.some((image) => image.id === id))) return
     setMutationError(null)
-    setDeletion({ kind: 'images', ids })
+    setDeletion({ kind: 'images', gameId: game.id, ids })
   }
 
   async function confirmDeletion() {
-    if (!deletion || !game || busyRef.current) return
+    if (!deletion || !game || deletion.gameId !== game.id || busyRef.current) return
     if (deletion.kind === 'game' && repository.deleteGame) {
       await mutate(() => repository.deleteGame!(game.id), (result) => {
         setDeletion(null)
@@ -99,6 +114,7 @@ export function GamePage() {
       })
     } else if (deletion.kind === 'images' && repository.deleteImages) {
       const ids = deletion.ids
+      if (!ids.every((id) => gameImages.some((image) => image.id === id))) return
       await mutate(() => repository.deleteImages!(ids), () => {
         setDeletion(null)
         setSelectedImage(null)
@@ -139,7 +155,7 @@ export function GamePage() {
 
       <div className="game-management-bar">
         {canDeleteImages && <p>勾选图片可跨模块批量删除；点击移动手柄可选择目标模块。</p>}
-        {editable && repository.deleteGame && <button className="danger-button" type="button" disabled={busy} onClick={() => { setMutationError(null); setDeletion({ kind: 'game' }) }}>删除游戏</button>}
+        {editable && repository.deleteGame && <button className="danger-button" type="button" disabled={busy} onClick={() => { if (busyRef.current) return; setMutationError(null); setDeletion({ kind: 'game', gameId: game.id }) }}>删除游戏</button>}
       </div>
       {warning && <div className="management-warning" role="status">{warning}</div>}
       {mutationError && !deletion && !movingImage && <div className="editor-error" role="alert">{mutationError}</div>}
@@ -176,7 +192,7 @@ export function GamePage() {
                 <div className="module-heading-actions">
                   <p>{moduleImages.length} 张</p>
                   {editable && repository.updateModule && (
-                    <button type="button" aria-label={`编辑 ${module.name}模块`} onClick={() => setEditingModule(module)}><Pencil size={14} /> 编辑</button>
+                    <button type="button" disabled={busy} aria-label={`编辑 ${module.name}模块`} onClick={() => { if (!busyRef.current) setEditingModule(module) }}><Pencil size={14} /> 编辑</button>
                   )}
                 </div>
               </header>
@@ -190,10 +206,10 @@ export function GamePage() {
                       </div>
                     )}
                     <div className="image-grid">
-                      {images.map((image) => <ImageCard key={image.id} image={image} onOpen={setSelectedImage} busy={busy}
+                      {images.map((image) => <ImageCard key={image.id} image={image} onOpen={(item) => { if (!busyRef.current) setSelectedImage(item) }} busy={busy}
                         selected={selectedIds.includes(image.id)}
                         onSelect={canDeleteImages ? (id, selected) => setSelectedIds((current) => selected ? [...new Set([...current, id])] : current.filter((item) => item !== id)) : undefined}
-                        onMove={canMove ? (item) => { setMutationError(null); setMovingImage(item) } : undefined}
+                        onMove={canMove ? (item) => { if (busyRef.current) return; setMutationError(null); setMovingImage(item) } : undefined}
                         onDragImage={(id) => { setDraggingId(id); if (!id) setDropTarget(null) }} />)}
                     </div>
                   </div>
@@ -212,24 +228,21 @@ export function GamePage() {
             .filter((image) => image.moduleId === selectedImage.moduleId && (image.flowId || null) === (selectedImage.flowId || null))
             .sort(compareImages)}
           initialImageId={selectedImage.id}
-          onClose={() => setSelectedImage(null)}
-          suspended={Boolean(deletion)}
+          onClose={() => { if (!busyRef.current) setSelectedImage(null) }}
+          suspended={Boolean(deletion) || busy}
           onDelete={canDeleteImages ? (image) => requestDeletion([image.id]) : undefined}
           onSaveMetadata={editable && repository.updateImageMetadata ? async (imageId, update) => {
-            await repository.updateImageMetadata?.(imageId, update)
-            setSelectedImage(null)
-            await refresh()
+            if (!gameImages.some((image) => image.id === imageId)) return
+            await mutate(() => repository.updateImageMetadata!(imageId, update), () => setSelectedImage(null), true)
           } : undefined}
         />
       )}
       {editingModule && editable && repository.updateModule && (
         <ModuleEditor
           module={editingModule}
-          onClose={() => setEditingModule(null)}
+          onClose={() => { if (!busyRef.current) setEditingModule(null) }}
           onSave={async (update) => {
-            await repository.updateModule?.(editingModule.id, update)
-            setEditingModule(null)
-            await refresh()
+            await mutate(() => repository.updateModule!(editingModule.id, update), () => setEditingModule(null), true)
           }}
         />
       )}
