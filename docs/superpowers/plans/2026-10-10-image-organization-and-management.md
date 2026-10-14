@@ -27,6 +27,7 @@
 - Empty, duplicate, unauthorized, and cross-game move/delete inputs must not mutate another owner’s records; Task 2 owns the SQL/API review.
 - Storage removal failures must return a partial result while leaving queue rows for later retry; Task 2 owns the tests.
 - Same-named flows in different modules must not mix in the viewer, and touch/keyboard users must not depend on drag-and-drop; Task 3 owns the tests.
+- Blank/custom update descriptions, a diverged remote, and failed validation must not create or push the wrong commit; Task 4 owns the tests.
 
 ---
 
@@ -92,7 +93,25 @@
 - [ ] Run focused tests, `npm test`, `npm run typecheck`, and `npm run build`; all must pass.
 - [ ] Commit with message `feat: manage images from game details`.
 
-### Task 4: Live migration and deployment verification
+### Task 4: One-click manual update command
+
+**Files:**
+- Create: `update-site.command`
+- Create: `scripts/update-site.test.ts`
+- Modify: `README.md`
+
+**Interfaces:**
+- Produces: an executable macOS/terminal update helper with default commit message `feat:update`.
+- Consumes: existing `npm test`, `npm run build`, Git remote `origin`, branch `main`, and GitHub Pages workflow.
+
+- [ ] Write failing black-box tests that run the real command in isolated temporary Git repositories with fake validation commands, covering blank/custom messages, no-change pushes, validation failure, and a remote main that is not an ancestor.
+- [ ] Run `npm test -- scripts/update-site.test.ts` and verify failure because the command does not exist.
+- [ ] Implement the command with fail-fast validation, safe remote ancestry checking, optional message argument, interactive default, and no force push.
+- [ ] Document double-click and terminal usage, then set the executable bit.
+- [ ] Run the focused test, `npm test`, `npm run typecheck`, `npm run build`, and `git diff --check`; all must pass.
+- [ ] Commit with message `feat: add one-click site updater`.
+
+### Task 5: Live migration and deployment verification
 
 **Files:**
 - Modify only if verification exposes a tested defect.
