@@ -1,4 +1,4 @@
-import { ArrowLeft, ArrowRight, Download, LoaderCircle, Pencil, X } from 'lucide-react'
+import { ArrowLeft, ArrowRight, Download, LoaderCircle, Pencil, Trash2, X } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 
 import type { UiImage } from '../domain/models'
@@ -9,6 +9,8 @@ interface ImageViewerProps {
   initialImageId: string
   onClose: () => void
   onSaveMetadata?: (imageId: string, update: ImageMetadataUpdate) => Promise<void>
+  onDelete?: (image: UiImage) => void
+  suspended?: boolean
 }
 
 function isEditableTarget(target: EventTarget | null) {
@@ -20,7 +22,7 @@ function isEditableTarget(target: EventTarget | null) {
   return Boolean(target.closest('[contenteditable]:not([contenteditable="false"])'))
 }
 
-export function ImageViewer({ images, initialImageId, onClose, onSaveMetadata }: ImageViewerProps) {
+export function ImageViewer({ images, initialImageId, onClose, onSaveMetadata, onDelete, suspended }: ImageViewerProps) {
   const initialIndex = Math.max(0, images.findIndex((image) => image.id === initialImageId))
   const [index, setIndex] = useState(initialIndex)
   const image = images[index]
@@ -36,6 +38,7 @@ export function ImageViewer({ images, initialImageId, onClose, onSaveMetadata }:
 
   useEffect(() => {
     function handleKeydown(event: KeyboardEvent) {
+      if (suspended) return
       if (event.key === 'Escape') {
         if (editing) {
           setEditing(false)
@@ -57,7 +60,7 @@ export function ImageViewer({ images, initialImageId, onClose, onSaveMetadata }:
     }
     window.addEventListener('keydown', handleKeydown)
     return () => window.removeEventListener('keydown', handleKeydown)
-  }, [canMove, editing, images.length, onClose])
+  }, [canMove, editing, images.length, onClose, suspended])
 
   useEffect(() => {
     setEditing(false)
@@ -95,7 +98,7 @@ export function ImageViewer({ images, initialImageId, onClose, onSaveMetadata }:
   if (!image) return null
 
   return (
-    <div className="viewer-backdrop" role="dialog" aria-modal="true" aria-label={image.title}>
+    <div className="viewer-backdrop" role="dialog" aria-modal="true" aria-label={image.title} inert={suspended}>
       <button className="viewer-close" type="button" onClick={onClose} aria-label="关闭大图"><X /></button>
       <div className="viewer-canvas">
         {canMove && (
@@ -149,6 +152,7 @@ export function ImageViewer({ images, initialImageId, onClose, onSaveMetadata }:
               {image.tags.map((tag) => <span className="tag" key={tag}>#{tag}</span>)}
             </div>
             {onSaveMetadata && <button className="viewer-edit-button" type="button" onClick={beginEditing}><Pencil size={15} /> 编辑图片资料</button>}
+            {onDelete && <button className="viewer-edit-button danger-text" type="button" onClick={() => onDelete(image)}><Trash2 size={15} /> 删除图片</button>}
           </>
         )}
         <a className="secondary-button viewer-download" href={image.downloadUrl || image.imageUrl} download={image.originalFilename}>

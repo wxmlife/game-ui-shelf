@@ -250,6 +250,32 @@ h1, h2, h3, .brand-copy strong { font-family: "SF Pro Display", "PingFang SC", s
 .image-card-body h4 { margin: 0 0 7px; overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .image-card-meta { display: flex; gap: 8px; margin-bottom: 9px; color: var(--muted); font-size: 9px; }
 
+.game-management-bar { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
+.game-management-bar p { margin: 0; color: var(--muted); font-size: 12px; }
+.danger-button { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; min-height: 44px; padding: 0 16px; border: 1px solid rgba(255,109,109,0.35); border-radius: 10px; background: rgba(255,109,109,0.09); color: #ffaaaa; font-size: 12px; }
+.danger-text { color: #ffaaaa; }
+.danger-button:disabled, .secondary-button:disabled, .image-move-handle:disabled { opacity: 0.45; cursor: not-allowed; }
+.selection-toolbar { position: sticky; bottom: 20px; z-index: 25; display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 18px; padding: 12px 16px; border: 1px solid rgba(216,255,98,0.35); border-radius: 12px; background: #1c211f; box-shadow: 0 8px 24px #0005; font-size: 13px; }
+.selection-toolbar strong { margin-right: auto; }
+.image-card.is-selected { border-color: var(--accent); }
+.image-card-controls { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px; padding: 5px 8px; border-bottom: 1px solid var(--line); }
+.image-card-controls label { display: inline-flex; align-items: center; gap: 4px; min-height: 44px; color: var(--muted); font-size: 11px; cursor: pointer; }
+.image-card-controls input { width: 18px; height: 18px; accent-color: var(--accent); }
+.image-move-handle { display: inline-flex; align-items: center; gap: 2px; min-height: 44px; padding: 0 6px; border: 0; border-radius: 7px; background: transparent; color: #cbd2cd; font-size: 11px; cursor: grab; }
+.image-move-handle:hover { background: var(--surface-3); }
+.image-move-handle:active { cursor: grabbing; }
+.image-card-controls :focus-visible, .management-dialog :focus-visible, .danger-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.module-section.is-drop-target { border-radius: 14px; outline: 2px dashed var(--accent); outline-offset: 8px; background: rgba(216,255,98,0.04); }
+.management-warning { margin-bottom: 18px; padding: 14px 16px; border: 1px solid rgba(255,173,74,0.3); border-radius: 10px; background: rgba(255,173,74,0.07); color: #ffbd69; font-size: 13px; line-height: 1.6; }
+.management-dialog { max-height: calc(100dvh - 48px); overflow-y: auto; }
+.management-dialog > p:not(.eyebrow) { font-size: 13px; line-height: 1.7; }
+.management-dialog select { width: 100%; min-height: 44px; padding: 0 10px; border: 1px solid var(--line); border-radius: 8px; background: #0b0e0d; color: #fff; font-size: 13px; }
+.management-dialog label span { font-size: 12px; }
+.management-dialog input { min-height: 44px; font-size: 14px; }
+.management-dialog-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 8px; }
+@media (max-width: 860px) { .selection-toolbar { bottom: 76px; } }
+@media (max-width: 560px) { .game-management-bar { align-items: flex-start; flex-direction: column; } }
+
 .viewer-backdrop { position: fixed; inset: 0; z-index: 100; display: grid; grid-template-columns: minmax(0, 1fr) 320px; background: rgba(4,6,5,0.96); backdrop-filter: blur(14px); }
 .viewer-close { position: fixed; right: 18px; top: 18px; z-index: 102; display: grid; width: 42px; height: 42px; place-items: center; border: 1px solid var(--line); border-radius: 50%; background: #181c1a; color: #fff; }
 .viewer-canvas { position: relative; display: grid; min-width: 0; place-items: center; padding: 34px 72px; }

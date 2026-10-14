@@ -22,6 +22,7 @@ function image(
     moduleId: `${gameId}-${moduleKey}`,
     moduleKey,
     moduleName,
+    flowId: options.flowName ? `${gameId}-${moduleKey}-${options.flowName}` : undefined,
     flowName: options.flowName,
     title,
     originalFilename: `${moduleKey}${moduleName}-${title}.png`,

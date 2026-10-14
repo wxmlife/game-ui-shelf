@@ -1,6 +1,6 @@
 import { ArrowRight, LayoutGrid, Upload } from 'lucide-react'
-import { useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { useEffect, useMemo, useState } from 'react'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 
 import { useLibrary } from '../app/LibraryContext'
 import { EmptyState } from '../components/EmptyState'
@@ -8,6 +8,12 @@ import { FilterBar } from '../components/FilterBar'
 import { GameCard } from '../components/GameCard'
 
 export function LibraryPage() {
+  const location = useLocation()
+  const navigate = useNavigate()
+  const [warning] = useState<string | null>(() => typeof location.state?.mutationWarning === 'string' ? location.state.mutationWarning : null)
+  useEffect(() => {
+    if (location.state?.mutationWarning) navigate(location.pathname, { replace: true, state: null })
+  }, [location.pathname, location.state, navigate])
   const { snapshot, loading, error } = useLibrary()
   const [platform, setPlatform] = useState('')
   const [tag, setTag] = useState('')
@@ -48,6 +54,7 @@ export function LibraryPage() {
 
   return (
     <main className="page library-page">
+      {warning && <div className="management-warning" role="status">{warning}</div>}
       <section className="library-hero">
         <div>
           <p className="eyebrow">PERSONAL GAME UI ARCHIVE</p>

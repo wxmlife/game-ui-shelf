@@ -1,13 +1,246 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { App } from '../app/App'
 import { demoSnapshot } from '../data/demoData'
-import type { LibraryRepository } from '../data/libraryRepository'
+import { demoRepository } from '../data/demoRepository'
+import type { LibraryRepository, MutationResult } from '../data/libraryRepository'
+import type { LibrarySnapshot } from '../domain/models'
 
 afterEach(() => {
   window.location.hash = '#/'
+})
+
+function managementFixture() {
+  const game = { ...demoSnapshot.games[0], id: 'game', name: '测试游戏' }
+  const modules = ['源模块', '目标模块', '空模块'].map((name, index) => ({
+    id: `module-${index}`, gameId: game.id, key: name, name, sortOrder: index,
+  }))
+  const images = ['图片甲', '图片乙', '图片丙'].map((title, index) => ({
+    ...demoSnapshot.images[0], id: `image-${index}`, gameId: game.id,
+    moduleId: modules[index === 2 ? 1 : 0].id, moduleName: modules[index === 2 ? 1 : 0].name,
+    title, flowId: index === 2 ? 'flow-other' : 'flow-source', flowName: '同名流程', sequenceOrder: index + 1,
+  }))
+  const snapshot: LibrarySnapshot = { games: [game], modules, images, captureSets: [] }
+  const repository: LibraryRepository = {
+    mode: 'cloud', getSnapshot: vi.fn(async () => structuredClone(snapshot)), submitImport: vi.fn(),
+    deleteImages: vi.fn(async (ids: string[]) => {
+      snapshot.images = snapshot.images.filter((image) => !ids.includes(image.id))
+      return { status: 'complete' as const }
+    }),
+    deleteGame: vi.fn(async () => { snapshot.games = []; snapshot.images = []; return { status: 'complete' as const } }),
+    moveImage: vi.fn(async (imageId: string, moduleId: string) => {
+      const image = snapshot.images.find((item) => item.id === imageId)!
+      image.moduleId = moduleId
+      return { status: 'complete' as const }
+    }),
+  }
+  window.location.hash = '#/game/game'
+  return { snapshot, repository }
+}
+
+describe('game image management', () => {
+  it('preserves named demo flows separately from images without a flow', async () => {
+    const user = userEvent.setup()
+    window.location.hash = '#/game/idol-empire'
+    render(<App repository={demoRepository} />)
+    await user.click(await screen.findByRole('button', { name: '查看 任务完成' }))
+    expect(screen.queryByRole('button', { name: '下一张' })).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '关闭大图' }))
+    expect(screen.getByRole('heading', { name: '完成任务' })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '查看 奖励入口' }))
+    expect(screen.getByRole('dialog')).toHaveTextContent('1 / 3')
+    await user.click(screen.getByRole('button', { name: '下一张' }))
+    expect(within(screen.getByRole('dialog')).getByRole('heading', { name: '奖励详情' })).toBeInTheDocument()
+  })
+
+  it('requires a count confirmation for viewer deletion and refreshes the cards', async () => {
+    const user = userEvent.setup()
+    const { repository } = managementFixture()
+    render(<App repository={repository} />)
+    await user.click(await screen.findByRole('button', { name: '查看 图片甲' }))
+    await user.click(screen.getByRole('button', { name: '删除图片' }))
+    const dialog = screen.getByRole('alertdialog')
+    expect(dialog).toHaveTextContent('1 张')
+    expect(repository.deleteImages).not.toHaveBeenCalled()
+    await user.click(within(dialog).getByRole('button', { name: '确认删除' }))
+    await waitFor(() => expect(screen.queryByRole('button', { name: '查看 图片甲' })).not.toBeInTheDocument())
+    expect(await screen.findByRole('button', { name: '查看 图片乙' })).toBeInTheDocument()
+    expect(repository.deleteImages).toHaveBeenCalledWith(['image-0'])
+    expect(repository.getSnapshot).toHaveBeenCalledTimes(2)
+  })
+
+  it('selects across modules, can cancel selection, and deletes only the confirmed selection', async () => {
+    const user = userEvent.setup()
+    const { repository } = managementFixture()
+    render(<App repository={repository} />)
+    await user.click(await screen.findByRole('checkbox', { name: '选择 图片甲' }))
+    await user.click(screen.getByRole('button', { name: '取消选择' }))
+    expect(screen.getByRole('checkbox', { name: '选择 图片甲' })).not.toBeChecked()
+    await user.click(screen.getByRole('checkbox', { name: '选择 图片甲' }))
+    await user.click(screen.getByRole('checkbox', { name: '选择 图片丙' }))
+    expect(screen.getByRole('toolbar', { name: '图片批量管理' })).toHaveTextContent('已选 2 张')
+    await user.click(screen.getByRole('button', { name: '删除已选' }))
+    expect(screen.getByRole('alertdialog')).toHaveTextContent('2 张')
+    await user.click(screen.getByRole('button', { name: '确认删除' }))
+    await waitFor(() => expect(repository.deleteImages).toHaveBeenCalledWith(['image-0', 'image-2']))
+    expect(await screen.findByRole('button', { name: '查看 图片乙' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '查看 图片丙' })).not.toBeInTheDocument()
+    expect(within(screen.getByRole('region', { name: '目标模块' })).getByText('这个模块还没有截图')).toBeInTheDocument()
+  })
+
+  it('requires the exact full game name before deleting and navigates to the refreshed shelf', async () => {
+    const user = userEvent.setup()
+    const { repository } = managementFixture()
+    render(<App repository={repository} />)
+    await user.click(await screen.findByRole('button', { name: '删除游戏' }))
+    expect(screen.getByRole('alertdialog')).toHaveTextContent('3 张')
+    const input = screen.getByRole('textbox', { name: '输入完整游戏名称' })
+    expect(input).toHaveFocus()
+    await user.type(input, '测试')
+    expect(screen.getByRole('button', { name: '确认删除' })).toBeDisabled()
+    await user.type(input, '游戏')
+    await user.click(screen.getByRole('button', { name: '确认删除' }))
+    expect(await screen.findByRole('heading', { name: '游戏书架' })).toBeInTheDocument()
+    expect(repository.deleteGame).toHaveBeenCalledWith('game')
+    expect(repository.getSnapshot).toHaveBeenCalledTimes(2)
+  })
+
+  it('opens movement with the keyboard, cancels with Escape, and treats the source as a no-op', async () => {
+    const user = userEvent.setup()
+    const { repository } = managementFixture()
+    render(<App repository={repository} />)
+    const handle = await screen.findByRole('button', { name: '移动 图片甲 到模块' })
+    handle.focus()
+    await user.keyboard('{Enter}')
+    expect(screen.getByRole('dialog', { name: '移动到模块' })).toBeInTheDocument()
+    await user.keyboard('{Escape}')
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(handle).toHaveFocus()
+    await user.click(handle)
+    expect(screen.getByRole('combobox', { name: '目标模块' })).toHaveValue('module-0')
+    await user.click(screen.getByRole('button', { name: '确认移动' }))
+    expect(repository.moveImage).not.toHaveBeenCalled()
+    await user.click(handle)
+    await user.selectOptions(screen.getByRole('combobox', { name: '目标模块' }), 'module-2')
+    await user.click(screen.getByRole('button', { name: '确认移动' }))
+    await waitFor(() => expect(repository.moveImage).toHaveBeenCalledWith('image-0', 'module-2'))
+    expect(await within(await screen.findByRole('region', { name: '空模块' })).findByRole('button', { name: '查看 图片甲' })).toBeInTheDocument()
+    expect(repository.getSnapshot).toHaveBeenCalledTimes(2)
+  })
+
+  it('drags only the explicit handle into empty modules and preserves the emptied source', async () => {
+    const { repository, snapshot } = managementFixture()
+    snapshot.images = [snapshot.images[0]]
+    render(<App repository={repository} />)
+    const handle = await screen.findByRole('button', { name: '移动 图片甲 到模块' })
+    expect(handle).toHaveAttribute('draggable', 'true')
+    expect(screen.getByRole('button', { name: '查看 图片甲' })).not.toHaveAttribute('draggable', 'true')
+    const dataTransfer = { setData: vi.fn(), getData: () => 'image-0', effectAllowed: '' }
+    fireEvent.dragStart(handle, { dataTransfer })
+    fireEvent.drop(screen.getByRole('region', { name: '源模块' }), { dataTransfer })
+    expect(repository.moveImage).not.toHaveBeenCalled()
+    fireEvent.dragStart(handle, { dataTransfer })
+    fireEvent.dragOver(screen.getByRole('region', { name: '空模块' }), { dataTransfer })
+    fireEvent.drop(screen.getByRole('region', { name: '空模块' }), { dataTransfer })
+    await waitFor(() => expect(repository.moveImage).toHaveBeenCalledWith('image-0', 'module-2'))
+    expect(await within(await screen.findByRole('region', { name: '源模块' })).findByText('这个模块还没有截图')).toBeInTheDocument()
+  })
+
+  it('keeps viewer navigation within module and flow ID even when flow names match', async () => {
+    const user = userEvent.setup()
+    const { repository, snapshot } = managementFixture()
+    snapshot.images.push({ ...snapshot.images[0], id: 'different-flow', title: '不同流程', flowId: 'different' })
+    render(<App repository={repository} />)
+    await user.click(await screen.findByRole('button', { name: '查看 图片甲' }))
+    expect(screen.getByRole('dialog')).toHaveTextContent('1 / 2')
+    await user.click(screen.getByRole('button', { name: '下一张' }))
+    expect(within(screen.getByRole('dialog')).getByRole('heading', { name: '图片乙' })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '下一张' }))
+    expect(within(screen.getByRole('dialog')).getByRole('heading', { name: '图片甲' })).toBeInTheDocument()
+  })
+
+  it('groups no-flow images in their module and orders sequence ties by creation time then ID', async () => {
+    const user = userEvent.setup()
+    const { repository, snapshot } = managementFixture()
+    snapshot.images = [
+      { ...snapshot.images[0], id: 'z', title: '第三', flowId: undefined, sequenceOrder: 1, createdAt: '2026-01-02' },
+      { ...snapshot.images[0], id: 'b', title: '第二', flowId: undefined, sequenceOrder: 1, createdAt: '2026-01-01' },
+      { ...snapshot.images[0], id: 'a', title: '第一', flowId: undefined, sequenceOrder: 1, createdAt: '2026-01-01' },
+      snapshot.images[1], snapshot.images[2],
+    ]
+    render(<App repository={repository} />)
+    await user.click(await screen.findByRole('button', { name: '查看 第一' }))
+    expect(screen.getByRole('dialog')).toHaveTextContent('1 / 3')
+    await user.click(screen.getByRole('button', { name: '下一张' }))
+    expect(within(screen.getByRole('dialog')).getByRole('heading', { name: '第二' })).toBeInTheDocument()
+  })
+
+  it('shows mutation errors without closing confirmation and blocks duplicate submissions while busy', async () => {
+    const user = userEvent.setup()
+    const { repository } = managementFixture()
+    let rejectDelete!: (error: Error) => void
+    repository.deleteImages = vi.fn(() => new Promise<MutationResult>((_resolve, reject) => { rejectDelete = reject }))
+    render(<App repository={repository} />)
+    await user.click(await screen.findByRole('checkbox', { name: '选择 图片甲' }))
+    await user.click(screen.getByRole('button', { name: '删除已选' }))
+    await user.dblClick(screen.getByRole('button', { name: '确认删除' }))
+    expect(repository.deleteImages).toHaveBeenCalledTimes(1)
+    expect(screen.getByRole('button', { name: '删除中…' })).toBeDisabled()
+    await user.tab()
+    expect(screen.getByRole('alertdialog')).toContainElement(document.activeElement as HTMLElement)
+    rejectDelete(new Error('删除失败，请重试'))
+    expect(await screen.findByRole('alert')).toHaveTextContent('删除失败，请重试')
+    expect(screen.getByRole('alertdialog')).toBeInTheDocument()
+    await user.tab({ shift: true })
+    expect(screen.getByRole('button', { name: '确认删除' })).toHaveFocus()
+    await user.keyboard('{Escape}')
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+  })
+
+  it('shows partial cleanup as a non-blocking warning after refresh', async () => {
+    const user = userEvent.setup()
+    const { repository, snapshot } = managementFixture()
+    repository.deleteImages = vi.fn(async () => {
+      snapshot.images = snapshot.images.slice(1)
+      return { status: 'partial' as const, pendingCleanup: 2, message: '还有 2 个文件等待清理' }
+    })
+    render(<App repository={repository} />)
+    await user.click(await screen.findByRole('checkbox', { name: '选择 图片甲' }))
+    await user.click(screen.getByRole('button', { name: '删除已选' }))
+    await user.click(screen.getByRole('button', { name: '确认删除' }))
+    expect(await screen.findByRole('status')).toHaveTextContent('还有 2 个文件等待清理')
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '查看 图片乙' })).toBeEnabled()
+  })
+
+  it('carries a partial game deletion warning to the shelf', async () => {
+    const user = userEvent.setup()
+    const { repository, snapshot } = managementFixture()
+    repository.deleteGame = vi.fn(async () => {
+      snapshot.games = []; snapshot.images = []
+      return { status: 'partial' as const, pendingCleanup: 1, message: '游戏已删除，1 个文件等待清理' }
+    })
+    render(<App repository={repository} />)
+    await user.click(await screen.findByRole('button', { name: '删除游戏' }))
+    await user.type(screen.getByRole('textbox', { name: '输入完整游戏名称' }), '测试游戏')
+    await user.click(screen.getByRole('button', { name: '确认删除' }))
+    expect(await screen.findByRole('heading', { name: '游戏书架' })).toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent('游戏已删除，1 个文件等待清理')
+  })
+
+  it.each(['demo', 'missing'] as const)('hides management controls for %s mutation availability', async (mode) => {
+    const { repository } = managementFixture()
+    if (mode === 'demo') Object.assign(repository, { mode: 'demo' })
+    else { delete repository.moveImage; delete repository.deleteImages; delete repository.deleteGame }
+    render(<App repository={repository} />)
+    await userEvent.click(await screen.findByRole('button', { name: '查看 图片甲' }))
+    expect(screen.queryByRole('button', { name: '删除图片' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '删除游戏' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /移动 .* 到模块/ })).not.toBeInTheDocument()
+  })
 })
 
 describe('cloud metadata editing', () => {

@@ -1,28 +1,52 @@
 import { ArrowLeft, CalendarDays, Gamepad2, Image as ImageIcon, Pencil, Upload } from 'lucide-react'
-import { type CSSProperties, useMemo, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { type CSSProperties, useMemo, useRef, useState } from 'react'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 
 import { useLibrary } from '../app/LibraryContext'
 import { EmptyState } from '../components/EmptyState'
+import { DeleteConfirmDialog } from '../components/DeleteConfirmDialog'
 import { ImageCard } from '../components/ImageCard'
 import { ImageViewer } from '../components/ImageViewer'
 import { ModuleEditor } from '../components/ModuleEditor'
+import { MoveImageDialog } from '../components/MoveImageDialog'
+import type { MutationResult } from '../data/libraryRepository'
 import type { GameModule, UiImage } from '../domain/models'
 
 function groupByFlow(images: UiImage[]): Array<[string, UiImage[]]> {
   const groups = new Map<string, UiImage[]>()
   for (const image of images) {
-    const key = image.flowName || '其他界面'
+    const key = image.flowId || ''
     groups.set(key, [...(groups.get(key) ?? []), image])
   }
   return [...groups.entries()]
 }
 
+function compareImages(a: UiImage, b: UiImage) {
+  return a.sequenceOrder - b.sequenceOrder || a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id)
+}
+
+function mutationWarning(result: MutationResult) {
+  return result.status === 'partial' ? result.message || `资料已更新，还有 ${result.pendingCleanup ?? 0} 个文件等待清理。下次加载时会重试。` : null
+}
+
 export function GamePage() {
   const { gameId } = useParams()
+  const navigate = useNavigate()
   const { snapshot, loading, error, repository, refresh } = useLibrary()
   const [selectedImage, setSelectedImage] = useState<UiImage | null>(null)
   const [editingModule, setEditingModule] = useState<GameModule | null>(null)
+  const [movingImage, setMovingImage] = useState<UiImage | null>(null)
+  const [selectedIds, setSelectedIds] = useState<string[]>([])
+  const [deletion, setDeletion] = useState<{ kind: 'images'; ids: string[] } | { kind: 'game' } | null>(null)
+  const [busy, setBusy] = useState(false)
+  const busyRef = useRef(false)
+  const [mutationError, setMutationError] = useState<string | null>(null)
+  const [warning, setWarning] = useState<string | null>(null)
+  const [draggingId, setDraggingId] = useState<string | null>(null)
+  const [dropTarget, setDropTarget] = useState<string | null>(null)
+  const editable = repository.mode === 'cloud'
+  const canMove = editable && Boolean(repository.moveImage)
+  const canDeleteImages = editable && Boolean(repository.deleteImages)
 
   const game = snapshot?.games.find((item) => item.id === gameId)
   const modules = useMemo(
@@ -33,6 +57,55 @@ export function GamePage() {
     () => snapshot?.images.filter((item) => item.gameId === gameId) ?? [],
     [snapshot, gameId],
   )
+
+  async function mutate(action: () => Promise<MutationResult>, onSuccess: (result: MutationResult) => void) {
+    if (busyRef.current) return
+    busyRef.current = true
+    setBusy(true)
+    setMutationError(null)
+    setWarning(null)
+    try {
+      const result = await action()
+      if (result.status === 'unavailable') throw new Error(result.message || '当前无法执行此操作')
+      setWarning(mutationWarning(result))
+      onSuccess(result)
+      await refresh()
+    } catch (caught) {
+      setMutationError(caught instanceof Error ? caught.message : '操作失败，请重试')
+    } finally {
+      busyRef.current = false
+      setBusy(false)
+    }
+  }
+
+  async function moveImage(image: UiImage, targetModuleId: string) {
+    if (!canMove || !repository.moveImage || busyRef.current) return
+    if (image.moduleId === targetModuleId) { setMovingImage(null); return }
+    await mutate(() => repository.moveImage!(image.id, targetModuleId), () => setMovingImage(null))
+  }
+
+  function requestDeletion(ids: string[]) {
+    if (busyRef.current || !ids.length) return
+    setMutationError(null)
+    setDeletion({ kind: 'images', ids })
+  }
+
+  async function confirmDeletion() {
+    if (!deletion || !game || busyRef.current) return
+    if (deletion.kind === 'game' && repository.deleteGame) {
+      await mutate(() => repository.deleteGame!(game.id), (result) => {
+        setDeletion(null)
+        navigate('/', { state: { mutationWarning: mutationWarning(result) } })
+      })
+    } else if (deletion.kind === 'images' && repository.deleteImages) {
+      const ids = deletion.ids
+      await mutate(() => repository.deleteImages!(ids), () => {
+        setDeletion(null)
+        setSelectedImage(null)
+        setSelectedIds((current) => current.filter((id) => !ids.includes(id)))
+      })
+    }
+  }
 
   if (loading) return <div className="page-loading"><span />正在翻开这本游戏…</div>
   if (error) return <EmptyState title="游戏资料加载失败" description={error} />
@@ -64,6 +137,18 @@ export function GamePage() {
         <Link className="primary-button game-upload-button" to="/upload"><Upload size={17} /> 添加截图</Link>
       </header>
 
+      <div className="game-management-bar">
+        {canDeleteImages && <p>勾选图片可跨模块批量删除；点击移动手柄可选择目标模块。</p>}
+        {editable && repository.deleteGame && <button className="danger-button" type="button" disabled={busy} onClick={() => { setMutationError(null); setDeletion({ kind: 'game' }) }}>删除游戏</button>}
+      </div>
+      {warning && <div className="management-warning" role="status">{warning}</div>}
+      {mutationError && !deletion && !movingImage && <div className="editor-error" role="alert">{mutationError}</div>}
+      {selectedIds.length > 0 && <div className="selection-toolbar" role="toolbar" aria-label="图片批量管理">
+        <strong>已选 {selectedIds.length} 张</strong>
+        <button className="danger-button" type="button" disabled={busy} onClick={() => requestDeletion(selectedIds)}>删除已选</button>
+        <button className="secondary-button" type="button" disabled={busy} onClick={() => setSelectedIds([])}>取消选择</button>
+      </div>}
+
       <nav className="module-jump" aria-label="模块目录">
         <span>模块</span>
         {modules.map((module) => <a href={`#/game/${game.id}#module-${module.id}`} key={module.id}>{module.name}</a>)}
@@ -73,30 +158,43 @@ export function GamePage() {
         {modules.map((module) => {
           const moduleImages = gameImages
             .filter((image) => image.moduleId === module.id)
-            .sort((a, b) => a.sequenceOrder - b.sequenceOrder)
+            .sort(compareImages)
 
           return (
-            <section className="module-section" id={`module-${module.id}`} key={module.id}>
+            <section className={`module-section${dropTarget === module.id ? ' is-drop-target' : ''}`} id={`module-${module.id}`} key={module.id} aria-label={module.name}
+              onDragOver={(event) => { if (canMove && draggingId && !busy) { event.preventDefault(); event.dataTransfer.dropEffect = 'move'; setDropTarget(module.id) } }}
+              onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropTarget(null) }}
+              onDrop={(event) => {
+                event.preventDefault()
+                setDropTarget(null)
+                const image = gameImages.find((item) => item.id === draggingId)
+                setDraggingId(null)
+                if (image && canMove && !busy) void moveImage(image, module.id)
+              }}>
               <header className="module-heading">
                 <div><span>{module.key}</span><h2>{module.name}</h2></div>
                 <div className="module-heading-actions">
                   <p>{moduleImages.length} 张</p>
-                  {repository.updateModule && (
+                  {editable && repository.updateModule && (
                     <button type="button" aria-label={`编辑 ${module.name}模块`} onClick={() => setEditingModule(module)}><Pencil size={14} /> 编辑</button>
                   )}
                 </div>
               </header>
               {moduleImages.length ? (
-                groupByFlow(moduleImages).map(([flowName, images]) => (
-                  <div className="flow-group" key={flowName}>
-                    {flowName !== '其他界面' && (
+                groupByFlow(moduleImages).map(([flowId, images]) => (
+                  <div className="flow-group" key={flowId}>
+                    {images[0].flowName && (
                       <div className="flow-heading">
-                        <h3>{flowName}</h3>
+                        <h3>{images[0].flowName}</h3>
                         <span>{images.length} 步</span>
                       </div>
                     )}
                     <div className="image-grid">
-                      {images.map((image) => <ImageCard key={image.id} image={image} onOpen={setSelectedImage} />)}
+                      {images.map((image) => <ImageCard key={image.id} image={image} onOpen={setSelectedImage} busy={busy}
+                        selected={selectedIds.includes(image.id)}
+                        onSelect={canDeleteImages ? (id, selected) => setSelectedIds((current) => selected ? [...new Set([...current, id])] : current.filter((item) => item !== id)) : undefined}
+                        onMove={canMove ? (item) => { setMutationError(null); setMovingImage(item) } : undefined}
+                        onDragImage={(id) => { setDraggingId(id); if (!id) setDropTarget(null) }} />)}
                     </div>
                   </div>
                 ))
@@ -111,18 +209,20 @@ export function GamePage() {
       {selectedImage && (
         <ImageViewer
           images={gameImages
-            .filter((image) => (image.flowName || image.moduleId) === (selectedImage.flowName || selectedImage.moduleId))
-            .sort((a, b) => a.sequenceOrder - b.sequenceOrder)}
+            .filter((image) => image.moduleId === selectedImage.moduleId && (image.flowId || null) === (selectedImage.flowId || null))
+            .sort(compareImages)}
           initialImageId={selectedImage.id}
           onClose={() => setSelectedImage(null)}
-          onSaveMetadata={repository.updateImageMetadata ? async (imageId, update) => {
+          suspended={Boolean(deletion)}
+          onDelete={canDeleteImages ? (image) => requestDeletion([image.id]) : undefined}
+          onSaveMetadata={editable && repository.updateImageMetadata ? async (imageId, update) => {
             await repository.updateImageMetadata?.(imageId, update)
             setSelectedImage(null)
             await refresh()
           } : undefined}
         />
       )}
-      {editingModule && repository.updateModule && (
+      {editingModule && editable && repository.updateModule && (
         <ModuleEditor
           module={editingModule}
           onClose={() => setEditingModule(null)}
@@ -133,6 +233,12 @@ export function GamePage() {
           }}
         />
       )}
+      {movingImage && <MoveImageDialog image={movingImage} modules={modules} busy={busy} error={mutationError}
+        onClose={() => { if (!busy) { setMovingImage(null); setMutationError(null) } }}
+        onMove={(target) => void moveImage(movingImage, target)} />}
+      {deletion && <DeleteConfirmDialog count={deletion.kind === 'game' ? gameImages.length : deletion.ids.length}
+        gameName={deletion.kind === 'game' ? game.name : undefined} busy={busy} error={mutationError}
+        onClose={() => { if (!busy) { setDeletion(null); setMutationError(null) } }} onConfirm={() => void confirmDeletion()} />}
     </main>
   )
 }
