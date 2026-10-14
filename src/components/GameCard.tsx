@@ -1,4 +1,4 @@
-import { ArrowUpRight, Image as ImageIcon } from 'lucide-react'
+import { ArrowUpRight, Image as ImageIcon, Trash2 } from 'lucide-react'
 import type { CSSProperties } from 'react'
 import { Link } from 'react-router-dom'
 
@@ -6,6 +6,9 @@ import type { Game } from '../domain/models'
 
 interface GameCardProps {
   game: Game
+  managementMode?: boolean
+  busy?: boolean
+  onDelete?: (game: Game) => void
 }
 
 const dateFormatter = new Intl.DateTimeFormat('zh-CN', {
@@ -13,13 +16,18 @@ const dateFormatter = new Intl.DateTimeFormat('zh-CN', {
   day: 'numeric',
 })
 
-export function GameCard({ game }: GameCardProps) {
+export function GameCard({ game, managementMode = false, busy = false, onDelete }: GameCardProps) {
   return (
-    <article className="game-card" style={{ '--cover-tone': game.coverTone } as CSSProperties}>
+    <article className={`game-card${managementMode ? ' game-card--managing' : ''}`} style={{ '--cover-tone': game.coverTone } as CSSProperties}>
       <Link className="game-card-cover" to={`/game/${game.id}`} aria-label={`打开 ${game.name}`}>
         {game.coverUrl ? <img src={game.coverUrl} alt="" /> : <span>{game.name.slice(0, 2)}</span>}
         <span className="game-card-open"><ArrowUpRight size={18} /></span>
       </Link>
+      {managementMode && onDelete && (
+        <button className="game-card-delete" type="button" disabled={busy} aria-label={`删除游戏 ${game.name}`} onClick={() => onDelete(game)}>
+          <Trash2 size={15} /> 删除
+        </button>
+      )}
       <div className="game-card-body">
         <div className="game-card-titleline">
           <div>

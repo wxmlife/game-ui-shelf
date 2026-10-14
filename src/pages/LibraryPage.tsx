@@ -1,22 +1,42 @@
-import { ArrowRight, LayoutGrid, Upload } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
-import { Link, useLocation, useNavigate } from 'react-router-dom'
+import { ArrowRight, LayoutGrid, Settings2, Upload } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { Link } from 'react-router-dom'
 
 import { useLibrary } from '../app/LibraryContext'
+import { DeleteConfirmDialog } from '../components/DeleteConfirmDialog'
 import { EmptyState } from '../components/EmptyState'
 import { FilterBar } from '../components/FilterBar'
 import { GameCard } from '../components/GameCard'
+import type { MutationResult } from '../data/libraryRepository'
+import type { Game } from '../domain/models'
+
+function mutationWarning(result: MutationResult) {
+  return result.status === 'partial' ? result.message || `资料已更新，还有 ${result.pendingCleanup ?? 0} 个文件等待清理。下次加载时会重试。` : null
+}
 
 export function LibraryPage() {
-  const location = useLocation()
-  const navigate = useNavigate()
-  const [warning] = useState<string | null>(() => typeof location.state?.mutationWarning === 'string' ? location.state.mutationWarning : null)
-  useEffect(() => {
-    if (location.state?.mutationWarning) navigate(location.pathname, { replace: true, state: null })
-  }, [location.pathname, location.state, navigate])
-  const { snapshot, loading, error } = useLibrary()
+  const [warning, setWarning] = useState<string | null>(null)
+  const { snapshot, loading, error, repository, refresh } = useLibrary()
   const [platform, setPlatform] = useState('')
   const [tag, setTag] = useState('')
+  const [managementMode, setManagementMode] = useState(false)
+  const [deletingGameId, setDeletingGameId] = useState<string | null>(null)
+  const [mutationError, setMutationError] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [restoreManageFocus, setRestoreManageFocus] = useState(false)
+  const busyRef = useRef(false)
+  const active = useRef(true)
+  const manageButton = useRef<HTMLButtonElement>(null)
+  useEffect(() => {
+    active.current = true
+    return () => { active.current = false }
+  }, [])
+  const canManageGames = repository.mode === 'cloud' && Boolean(repository.deleteGame)
+  useEffect(() => {
+    if (!restoreManageFocus || deletingGameId || busy) return
+    manageButton.current?.focus()
+    setRestoreManageFocus(false)
+  }, [busy, deletingGameId, restoreManageFocus])
 
   const platforms = useMemo(
     () => [...new Set(snapshot?.games.flatMap((game) => game.platforms) ?? [])].sort(),
@@ -47,6 +67,44 @@ export function LibraryPage() {
     },
     [snapshot, platform, tag],
   )
+  const deletingGame = snapshot?.games.find((game) => game.id === deletingGameId)
+  const deletingImageCount = deletingGame
+    ? snapshot?.images.filter((image) => image.gameId === deletingGame.id).length ?? 0
+    : 0
+
+  function requestGameDeletion(game: Game) {
+    if (!canManageGames || busyRef.current || !snapshot?.games.some((item) => item.id === game.id)) return
+    setMutationError(null)
+    setDeletingGameId(game.id)
+  }
+
+  async function confirmGameDeletion() {
+    if (!deletingGame || !repository.deleteGame || busyRef.current) return
+    const gameId = deletingGame.id
+    busyRef.current = true
+    setBusy(true)
+    setMutationError(null)
+    setWarning(null)
+    try {
+      const result = await repository.deleteGame(gameId)
+      if (result.status === 'unavailable') throw new Error(result.message || '当前无法删除这个游戏')
+      if (active.current) {
+        setWarning(mutationWarning(result))
+        setDeletingGameId(null)
+        setRestoreManageFocus(true)
+      }
+      try {
+        await refresh()
+      } catch {
+        // LibraryProvider keeps a route-independent, non-blocking refresh warning.
+      }
+    } catch (caught) {
+      if (active.current) setMutationError(caught instanceof Error ? caught.message : '删除游戏失败，请重试')
+    } finally {
+      busyRef.current = false
+      if (active.current) setBusy(false)
+    }
+  }
 
   if (loading) return <div className="page-loading"><span />正在整理书架…</div>
   if (error) return <EmptyState title="资料库没有加载成功" description={error} />
@@ -82,23 +140,36 @@ export function LibraryPage() {
           <LayoutGrid size={19} />
           <span>{games.length} 本游戏</span>
         </div>
-        <FilterBar
-          platforms={platforms}
-          tags={tags}
-          platform={platform}
-          tag={tag}
-          onPlatformChange={setPlatform}
-          onTagChange={setTag}
-        />
+        <div className="section-toolbar-actions">
+          {canManageGames && (
+            <button ref={manageButton} className={`manage-games-button${managementMode ? ' is-active' : ''}`} type="button" disabled={busy}
+              aria-pressed={managementMode} onClick={() => { setManagementMode((current) => !current); setMutationError(null) }}>
+              <Settings2 size={15} /> {managementMode ? '完成管理' : '管理游戏'}
+            </button>
+          )}
+          <FilterBar
+            platforms={platforms}
+            tags={tags}
+            platform={platform}
+            tag={tag}
+            onPlatformChange={setPlatform}
+            onTagChange={setTag}
+          />
+        </div>
       </div>
+
+      {managementMode && <p className="game-management-note">管理模式：点击游戏卡片左上角的删除按钮；删除前仍需输入完整游戏名称确认。</p>}
 
       {games.length ? (
         <section className="game-grid" aria-label="游戏列表">
-          {games.map((game) => <GameCard key={game.id} game={game} />)}
+          {games.map((game) => <GameCard key={game.id} game={game} managementMode={managementMode} busy={busy} onDelete={requestGameDeletion} />)}
         </section>
       ) : (
         <EmptyState compact title="没有符合条件的游戏" description="清除筛选条件后再看看。" />
       )}
+
+      {deletingGame && <DeleteConfirmDialog count={deletingImageCount} gameName={deletingGame.name} busy={busy} error={mutationError}
+        onClose={() => { if (!busy) { setDeletingGameId(null); setMutationError(null) } }} onConfirm={() => void confirmGameDeletion()} />}
     </main>
   )
 }

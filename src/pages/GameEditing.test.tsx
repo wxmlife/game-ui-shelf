@@ -72,7 +72,7 @@ describe('game image management', () => {
     const preview = screen.getByRole('button', { name: '查看 图片甲' })
     expect(preview).toBeDisabled()
     expect(screen.getByRole('button', { name: '编辑 源模块模块' })).toBeDisabled()
-    expect(screen.getByRole('button', { name: '删除游戏' })).toBeDisabled()
+    expect(screen.queryByRole('button', { name: '删除游戏' })).not.toBeInTheDocument()
     await user.click(preview)
     expect(screen.queryByRole('dialog', { name: '图片甲' })).not.toBeInTheDocument()
     expect(repository.updateImageMetadata).not.toHaveBeenCalled()
@@ -182,15 +182,15 @@ describe('game image management', () => {
 
     await act(async () => { window.location.hash = '#/game/game-b' })
     await screen.findByRole('heading', { name: '另一游戏' })
-    await user.click(screen.getByRole('button', { name: '删除游戏' }))
-    await user.type(screen.getByRole('textbox', { name: '输入完整游戏名称' }), '另一')
+    await user.click(screen.getByRole('button', { name: '移动 另一图片 到模块' }))
+    expect(screen.getByRole('dialog', { name: '移动到模块' })).toHaveTextContent('另一图片')
 
     await act(async () => finishDelete())
 
     await waitFor(() => expect(repository.getSnapshot).toHaveBeenCalledTimes(2))
-    expect(screen.getByRole('textbox', { name: '输入完整游戏名称' })).toHaveValue('另一')
+    expect(screen.getByRole('dialog', { name: '移动到模块' })).toHaveTextContent('另一图片')
     await act(async () => finishRefresh())
-    await waitFor(() => expect(screen.getByRole('textbox', { name: '输入完整游戏名称' })).toHaveValue('另一'))
+    await waitFor(() => expect(screen.getByRole('dialog', { name: '移动到模块' })).toHaveTextContent('另一图片'))
     await act(async () => { window.location.hash = '#/game/game' })
     await screen.findByRole('heading', { name: '测试游戏' })
     expect(screen.queryByRole('button', { name: '查看 图片甲' })).not.toBeInTheDocument()
@@ -275,39 +275,6 @@ describe('game image management', () => {
     expect(await screen.findByRole('button', { name: '查看 图片乙' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '查看 图片丙' })).not.toBeInTheDocument()
     expect(within(screen.getByRole('region', { name: '目标模块' })).getByText('这个模块还没有截图')).toBeInTheDocument()
-  })
-
-  it('requires the exact full game name before deleting and navigates to the refreshed shelf', async () => {
-    const user = userEvent.setup()
-    const { repository } = managementFixture()
-    render(<App repository={repository} />)
-    await user.click(await screen.findByRole('button', { name: '删除游戏' }))
-    expect(screen.getByRole('alertdialog')).toHaveTextContent('3 张')
-    const input = screen.getByRole('textbox', { name: '输入完整游戏名称' })
-    expect(input).toHaveFocus()
-    await user.type(input, '测试')
-    expect(screen.getByRole('button', { name: '确认删除' })).toBeDisabled()
-    await user.type(input, '游戏')
-    await user.click(screen.getByRole('button', { name: '确认删除' }))
-    expect(await screen.findByRole('heading', { name: '游戏书架' })).toBeInTheDocument()
-    expect(repository.deleteGame).toHaveBeenCalledWith('game')
-    expect(repository.getSnapshot).toHaveBeenCalledTimes(2)
-  })
-
-  it('keeps a refresh failure visible after a successful game deletion navigates away', async () => {
-    const user = userEvent.setup()
-    const { repository, snapshot } = managementFixture()
-    repository.getSnapshot = vi.fn()
-      .mockResolvedValueOnce(structuredClone(snapshot))
-      .mockRejectedValueOnce(new Error('云端快照刷新失败'))
-    render(<App repository={repository} />)
-
-    await user.click(await screen.findByRole('button', { name: '删除游戏' }))
-    await user.type(screen.getByRole('textbox', { name: '输入完整游戏名称' }), '测试游戏')
-    await user.click(screen.getByRole('button', { name: '确认删除' }))
-
-    expect(await screen.findByRole('heading', { name: '游戏书架' })).toBeInTheDocument()
-    expect(await screen.findByRole('alert')).toHaveTextContent('资料库刷新失败，当前内容可能不是最新：云端快照刷新失败')
   })
 
   it('opens movement with the keyboard, cancels with Escape, and treats the source as a no-op', async () => {
@@ -416,21 +383,6 @@ describe('game image management', () => {
     expect(await screen.findByRole('status')).toHaveTextContent('还有 2 个文件等待清理')
     expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: '查看 图片乙' })).toBeEnabled()
-  })
-
-  it('carries a partial game deletion warning to the shelf', async () => {
-    const user = userEvent.setup()
-    const { repository, snapshot } = managementFixture()
-    repository.deleteGame = vi.fn(async () => {
-      snapshot.games = []; snapshot.images = []
-      return { status: 'partial' as const, pendingCleanup: 1, message: '游戏已删除，1 个文件等待清理' }
-    })
-    render(<App repository={repository} />)
-    await user.click(await screen.findByRole('button', { name: '删除游戏' }))
-    await user.type(screen.getByRole('textbox', { name: '输入完整游戏名称' }), '测试游戏')
-    await user.click(screen.getByRole('button', { name: '确认删除' }))
-    expect(await screen.findByRole('heading', { name: '游戏书架' })).toBeInTheDocument()
-    expect(screen.getByRole('status')).toHaveTextContent('游戏已删除，1 个文件等待清理')
   })
 
   it.each(['demo', 'missing'] as const)('hides management controls for %s mutation availability', async (mode) => {

@@ -1,6 +1,6 @@
 import { ArrowLeft, CalendarDays, Gamepad2, Image as ImageIcon, Pencil, Upload } from 'lucide-react'
 import { type CSSProperties, useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { Link, useParams } from 'react-router-dom'
 
 import { useLibrary } from '../app/LibraryContext'
 import { EmptyState } from '../components/EmptyState'
@@ -35,13 +35,12 @@ export function GamePage() {
 }
 
 function GameDetails({ gameId }: { gameId: string | undefined }) {
-  const navigate = useNavigate()
   const { snapshot, loading, error, repository, refresh } = useLibrary()
   const [selectedImage, setSelectedImage] = useState<UiImage | null>(null)
   const [editingModule, setEditingModule] = useState<GameModule | null>(null)
   const [movingImage, setMovingImage] = useState<UiImage | null>(null)
   const [selectedIds, setSelectedIds] = useState<string[]>([])
-  const [deletion, setDeletion] = useState<{ kind: 'images'; gameId: string; ids: string[] } | { kind: 'game'; gameId: string } | null>(null)
+  const [deletion, setDeletion] = useState<{ gameId: string; ids: string[] } | null>(null)
   const [busy, setBusy] = useState(false)
   const busyRef = useRef(false)
   const active = useRef(true)
@@ -107,25 +106,18 @@ function GameDetails({ gameId }: { gameId: string | undefined }) {
   function requestDeletion(ids: string[]) {
     if (busyRef.current || !game || !ids.length || !ids.every((id) => gameImages.some((image) => image.id === id))) return
     setMutationError(null)
-    setDeletion({ kind: 'images', gameId: game.id, ids })
+    setDeletion({ gameId: game.id, ids })
   }
 
   async function confirmDeletion() {
-    if (!deletion || !game || deletion.gameId !== game.id || busyRef.current) return
-    if (deletion.kind === 'game' && repository.deleteGame) {
-      await mutate(() => repository.deleteGame!(game.id), (result) => {
-        setDeletion(null)
-        navigate('/', { state: { mutationWarning: mutationWarning(result) } })
-      })
-    } else if (deletion.kind === 'images' && repository.deleteImages) {
-      const ids = deletion.ids
-      if (!ids.every((id) => gameImages.some((image) => image.id === id))) return
-      await mutate(() => repository.deleteImages!(ids), () => {
-        setDeletion(null)
-        setSelectedImage(null)
-        setSelectedIds((current) => current.filter((id) => !ids.includes(id)))
-      })
-    }
+    if (!deletion || !game || deletion.gameId !== game.id || busyRef.current || !repository.deleteImages) return
+    const ids = deletion.ids
+    if (!ids.every((id) => gameImages.some((image) => image.id === id))) return
+    await mutate(() => repository.deleteImages!(ids), () => {
+      setDeletion(null)
+      setSelectedImage(null)
+      setSelectedIds((current) => current.filter((id) => !ids.includes(id)))
+    })
   }
 
   if (loading) return <div className="page-loading"><span />正在翻开这本游戏…</div>
@@ -158,10 +150,9 @@ function GameDetails({ gameId }: { gameId: string | undefined }) {
         <Link className="primary-button game-upload-button" to="/upload"><Upload size={17} /> 添加截图</Link>
       </header>
 
-      <div className="game-management-bar">
-        {canDeleteImages && <p>勾选图片可跨模块批量删除；点击移动手柄可选择目标模块。</p>}
-        {editable && repository.deleteGame && <button className="danger-button" type="button" disabled={busy} onClick={() => { if (busyRef.current) return; setMutationError(null); setDeletion({ kind: 'game', gameId: game.id }) }}>删除游戏</button>}
-      </div>
+      {(canDeleteImages || canMove) && <div className="game-management-bar">
+        <p>这里用于模块与图片调整：勾选图片可跨模块批量删除；点击移动手柄可调整所属模块。</p>
+      </div>}
       {warning && <div className="management-warning" role="status">{warning}</div>}
       {mutationError && !deletion && !movingImage && <div className="editor-error" role="alert">{mutationError}</div>}
       {selectedIds.length > 0 && <div className="selection-toolbar" role="toolbar" aria-label="图片批量管理">
@@ -254,8 +245,7 @@ function GameDetails({ gameId }: { gameId: string | undefined }) {
       {movingImage && <MoveImageDialog image={movingImage} modules={modules} busy={busy} error={mutationError}
         onClose={() => { if (!busy) { setMovingImage(null); setMutationError(null) } }}
         onMove={(target) => void moveImage(movingImage, target)} />}
-      {deletion && <DeleteConfirmDialog count={deletion.kind === 'game' ? gameImages.length : deletion.ids.length}
-        gameName={deletion.kind === 'game' ? game.name : undefined} busy={busy} error={mutationError}
+      {deletion && <DeleteConfirmDialog count={deletion.ids.length} busy={busy} error={mutationError}
         onClose={() => { if (!busy) { setDeletion(null); setMutationError(null) } }} onConfirm={() => void confirmDeletion()} />}
     </main>
   )
