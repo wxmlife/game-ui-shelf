@@ -84,6 +84,14 @@ URL 和 key 必须同时存在；只配置其中一项时，页面会显示配�
    - `VITE_OWNER_EMAIL`
 5. 推送 `main`，在 **Actions** 中等待 `Deploy to GitHub Pages` 完成。
 
+以后手动更新网站时，可以在 macOS 中双击仓库根目录的 [`update-site.command`](update-site.command)，输入本次更新说明后按回车；直接回车会使用提交信息 `feat:update`。也可以在终端中运行：
+
+```bash
+./update-site.command 修复 公会商店图片
+```
+
+命令行参数会合并为一条提交说明，无需再次输入。脚本会先检查远端 `main` 是否仍在当前提交历史中，再运行完整测试和生产构建；成功后暂存并提交变化，推送到 `origin/main`，最后显示 GitHub Pages 地址。若没有文件变化，会跳过新提交，但仍会推送已经验证的本地提交。远端有新提交、测试失败或构建失败时会停止；先处理错误再重试。首次使用前请完成 `npm ci`，并确认已配置 GitHub 推送权限。
+
 项目使用相对 Vite `base` 和 Hash 路由，因此在 `https://<user>.github.io/<repo>/` 这类子路径下也能正常打开。`public/404.html` 只负责把意外的非 Hash 地址送回站点入口。
 
 > `VITE_*` 值会在构建时写入前端文件。Supabase `anon` key 或新版 `publishable` key 本来就允许公开，安全性依赖 Auth 和 RLS。绝对不要把 `service_role` key、数据库密码或登录密码放进 GitHub Variables、源码或 Pages 构建产物。
