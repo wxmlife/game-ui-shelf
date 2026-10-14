@@ -78,11 +78,16 @@ function GameDetails({ gameId }: { gameId: string | undefined }) {
     setWarning(null)
     try {
       const result = await action()
-      if (!active.current) return
       if (result.status === 'unavailable') throw new Error(result.message || '当前无法执行此操作')
-      setWarning(mutationWarning(result))
-      onSuccess(result)
-      await refresh()
+      if (active.current) {
+        setWarning(mutationWarning(result))
+        onSuccess(result)
+      }
+      try {
+        await refresh()
+      } catch {
+        // LibraryProvider keeps a route-independent, non-blocking refresh warning.
+      }
     } catch (caught) {
       if (!active.current) return
       if (reportToEditor) throw caught

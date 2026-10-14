@@ -143,6 +143,21 @@ h1, h2, h3, .brand-copy strong { font-family: "SF Pro Display", "PingFang SC", s
 .status-dot { width: 7px; height: 7px; margin-top: 5px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 10px var(--accent); }
 
 .page-stage { min-width: 0; }
+.library-refresh-error {
+  display: flex;
+  width: min(1392px, calc(100% - 88px));
+  align-items: center;
+  gap: 10px;
+  margin: 20px auto -20px;
+  padding: 12px 15px;
+  border: 1px solid rgba(255,173,74,0.3);
+  border-radius: 10px;
+  background: rgba(255,173,74,0.07);
+  color: #ffbd69;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.library-refresh-error svg { flex: 0 0 auto; }
 .page { width: min(1480px, 100%); margin: 0 auto; padding: 48px 44px 84px; }
 .eyebrow { margin: 0 0 10px; color: var(--accent); font-size: 10px; font-weight: 800; letter-spacing: 0.18em; }
 .hero-description { max-width: 650px; margin: 12px 0 0; color: var(--muted); font-size: 15px; line-height: 1.7; }
@@ -446,6 +461,7 @@ h1, h2, h3, .brand-copy strong { font-family: "SF Pro Display", "PingFang SC", s
   .sidebar nav a { flex-direction: column; gap: 3px; padding: 6px; font-size: 9px; }
   .sidebar nav a span { display: inline; }
   .page { padding: 34px 20px 100px; }
+  .library-refresh-error { width: calc(100% - 40px); margin-bottom: 0; }
   .library-hero { align-items: flex-start; flex-direction: column; }
   .game-grid, .game-grid--search { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .game-hero { grid-template-columns: 120px 1fr; }

@@ -38,7 +38,14 @@ npm run preview
 
 ### 2. 执行数据库 migration
 
-最直接的方式是打开 Supabase 的 **SQL Editor**，按文件名顺序执行 `supabase/migrations` 中的全部 SQL：先执行 [`202610090001_initial_schema.sql`](supabase/migrations/202610090001_initial_schema.sql)，再执行 [`202610090002_atomic_image_metadata.sql`](supabase/migrations/202610090002_atomic_image_metadata.sql)。建议在专用的新项目中执行；后续新增 migration 时也按时间戳顺序继续执行。
+最直接的方式是打开 Supabase 的 **SQL Editor**，按文件名顺序执行 `supabase/migrations` 中的全部 SQL：
+
+1. [`202610090001_initial_schema.sql`](supabase/migrations/202610090001_initial_schema.sql)
+2. [`202610090002_atomic_image_metadata.sql`](supabase/migrations/202610090002_atomic_image_metadata.sql)
+3. [`202610100003_image_management.sql`](supabase/migrations/202610100003_image_management.sql)
+4. [`202610140004_cleanup_ack.sql`](supabase/migrations/202610140004_cleanup_ack.sql)
+
+第 3 份 migration 增加图片移动、批量删除、游戏删除和持久化文件清理队列；第 4 份用于安全收敛“Storage 已删除、但浏览器没来得及确认队列”的中断情况。建议在专用的新项目中执行；已有项目只需继续执行尚未执行的后续文件，不要重复执行已上线的 migration。
 
 如果已使用 Supabase CLI，也可以在仓库根目录运行：
 
@@ -98,23 +105,28 @@ URL 和 key 必须同时存在；只配置其中一项时，页面会显示配�
 
 ## 文件夹与文件名规则
 
-上传时选择整个游戏文件夹。第一层文件夹名会成为游戏名称；文件名的英文前缀是模块 key，其后中文是模块显示名，用 `-` 连接流程步骤。
+上传时选择整个游戏文件夹。第一层文件夹名会成为游戏名称。推荐文件名格式是 `模块_图片内容名称[_序号].扩展名`；只有最后一个纯数字下划线段会被视为顺序。
 
 ```text
 IDOL/
-├── home首页.png
-├── task任务.png
-├── reward奖励.png
-├── reward奖励-奖励详情.png
-├── reward奖励-奖励领取.png
-└── 01-reward奖励-奖励入口.png
+├── 首页_主界面.png
+├── 任务_日常任务.png
+├── 奖励_奖励详情_1.png
+├── 奖励_奖励领取_2.png
+└── 公会_兑换商店界面_3.jpg
 ```
 
-- 可选的数字前缀（如 `01-`、`02-`）用于明确交互顺序；没有前缀时按选择顺序预排。
-- 上传预览中可修改模块、流程、标题、标签和顺序，再确认提交。
+- 例如 `公会_兑换商店界面_2.jpg` 会自动归入“公会”模块，图片标题与流程名为“兑换商店界面”，顺序为 `2`。
+- 系统会根据模块和标题自动生成去重关键词标签（例如“公会”“兑换”“商店”），并过滤“界面”“页面”等泛词；上传前仍可自由增删修改。
+- 旧格式 `reward奖励-奖励详情.png`、`02-reward奖励-奖励领取.jpeg` 以及带下划线的旧模块 key（如 `guild_shop公会商店-兑换详情.png`）继续兼容。
+- 没有显式序号时按选择顺序预排。上传预览中可修改模块、流程、标题、标签和顺序，再确认提交。
 - 支持 PNG、JPG/JPEG、WebP、GIF 和 AVIF。单张原图不能超过 25 MiB。
 - 缩略图在浏览器中生成为 WebP，最长边 560px；原图不会被替换或压缩。
 - 非图片、超限或重复文件会在上传前标出。批量过大时建议分批处理，实际总容量还受 Supabase 套餐与浏览器内存限制。
+
+## 删除与延迟清理
+
+单图、批量图片和整本游戏的删除都是永久删除。数据库会先在同一事务中删除元数据，并把原图、缩略图和封面路径写入持久化清理队列；浏览器随后删除私有 Storage 对象。如果网络中断、权限校验失败或关闭页面，未确认项会留在队列中，下次加载或删除操作时自动重试。只有服务端确认该账号对应的 Storage 对象已不存在时，才会移除队列项；网络或权限错误不会被当作“已删除”。
 
 ## 备份与恢复策略
 

@@ -107,7 +107,13 @@ export function UploadPage() {
           ? updateFiles(current, current.files.filter((file) => failedIds.has(file.id)))
           : current)
       }
-      if (nextResult.status === 'complete' || nextResult.status === 'partial') await refresh()
+      if (nextResult.status === 'complete' || nextResult.status === 'partial') {
+        try {
+          await refresh()
+        } catch {
+          // LibraryProvider keeps a route-independent, non-blocking refresh warning.
+        }
+      }
     } catch (error) {
       setResult({
         status: 'partial',

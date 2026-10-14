@@ -53,6 +53,78 @@ describe('parseImportFile', () => {
     expect(result.sequenceOrder).toBe(2)
   })
 
+  it('keeps underscores inside a legacy module key before parsing the hyphenated steps', () => {
+    const result = parseImportFile({
+      relativePath: 'IDOL/guild_shop公会商店-兑换详情.png',
+      fileName: 'guild_shop公会商店-兑换详情.png',
+      mimeType: 'image/png',
+      sourceIndex: 4,
+    })
+
+    expect(result).toMatchObject({
+      moduleKey: 'guild_shop',
+      moduleName: '公会商店',
+      title: '兑换详情',
+      flowName: '公会商店',
+      steps: ['兑换详情'],
+      sequenceOrder: 5,
+    })
+  })
+
+  it('keeps a plain legacy ASCII module key that contains underscores', () => {
+    const result = parseImportFile({
+      relativePath: 'IDOL/guild_shop公会商店.png',
+      fileName: 'guild_shop公会商店.png',
+      mimeType: 'image/png',
+      sourceIndex: 0,
+    })
+
+    expect(result).toMatchObject({
+      moduleKey: 'guild_shop',
+      moduleName: '公会商店',
+      title: '公会商店',
+      flowName: '',
+      steps: [],
+      sequenceOrder: 1,
+    })
+  })
+
+  it('parses an ASCII module followed by the recommended underscore title and order', () => {
+    const result = parseImportFile({
+      relativePath: 'IDOL/shop_兑换商店_2.jpg',
+      fileName: 'shop_兑换商店_2.jpg',
+      mimeType: 'image/jpeg',
+      sourceIndex: 8,
+    })
+
+    expect(result).toMatchObject({
+      moduleKey: 'shop',
+      moduleName: 'shop',
+      title: '兑换商店',
+      flowName: '兑换商店',
+      steps: ['兑换商店'],
+      sequenceOrder: 2,
+    })
+  })
+
+  it('keeps a prefixed legacy underscore key and uses the final step as the title', () => {
+    const result = parseImportFile({
+      relativePath: 'IDOL/02_battle_pass奖励-奖励入口-奖励确认-奖励详情.png',
+      fileName: '02_battle_pass奖励-奖励入口-奖励确认-奖励详情.png',
+      mimeType: 'image/png',
+      sourceIndex: 9,
+    })
+
+    expect(result).toMatchObject({
+      moduleKey: 'battle_pass',
+      moduleName: '奖励',
+      title: '奖励详情',
+      flowName: '奖励入口',
+      steps: ['奖励入口', '奖励确认', '奖励详情'],
+      sequenceOrder: 2,
+    })
+  })
+
   it('parses a Chinese module and title without an explicit order', () => {
     const result = parseImportFile({
       relativePath: 'IDOL/公会_总部已解锁.jpg',

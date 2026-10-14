@@ -50,7 +50,17 @@ export function parseImportFile(input: ImportFileInput): ParsedImportFile {
     : originalStem.trim()
   const firstUnderscore = cleanStem.indexOf('_')
   const firstHyphen = cleanStem.indexOf('-')
-  const usesUnderscoreFormat = firstUnderscore >= 0 && (firstHyphen < 0 || firstUnderscore < firstHyphen)
+  const legacyModuleSegment = firstHyphen >= 0 ? cleanStem.slice(0, firstHyphen) : cleanStem
+  const legacyKeyMatch = legacyModuleSegment.match(MODULE_KEY)
+  const legacyKey = legacyKeyMatch?.[1] ?? ''
+  const hasAttachedLegacyName = Boolean(
+    legacyKey && !legacyKey.endsWith('_') && legacyModuleSegment.slice(legacyKey.length).trim(),
+  )
+  const usesLegacyUnderscoreKey = hasAttachedLegacyName
+    && (firstHyphen >= 0 || legacyKey.includes('_'))
+  const usesUnderscoreFormat = firstUnderscore >= 0
+    && !usesLegacyUnderscoreKey
+    && (firstHyphen < 0 || firstUnderscore < firstHyphen)
   let module: ReturnType<typeof parseModule>
   let steps: string[]
   let title: string

@@ -98,12 +98,24 @@ export class SupabaseLibraryRepository implements LibraryRepository {
   private async drainCleanupQueue(ownerId: string): Promise<number> {
     let pending = 0
     let afterId = 0
+    const { data: latestRows, error: latestError } = await this.client.from('storage_cleanup_queue')
+      .select('id')
+      .eq('owner_id', ownerId)
+      .order('id', { ascending: false })
+      .limit(1)
+    if (latestError) throw latestError
+    const highWatermark = ((latestRows ?? []) as Array<{ id?: unknown }>)[0]?.id
+    if (highWatermark === undefined) return 0
+    if (typeof highWatermark !== 'number' || !Number.isFinite(highWatermark)) {
+      throw new Error('清理队列返回了无效的任务 ID')
+    }
 
     while (true) {
       const { data, error } = await this.client.from('storage_cleanup_queue')
         .select('id,bucket,path')
         .eq('owner_id', ownerId)
         .gt('id', afterId)
+        .lte('id', highWatermark)
         .order('id', { ascending: true })
         .limit(CLEANUP_PAGE_SIZE)
       if (error) throw error
@@ -115,26 +127,39 @@ export class SupabaseLibraryRepository implements LibraryRepository {
         const bucketRows = rows.filter((row) => row.bucket === bucket)
         for (let start = 0; start < bucketRows.length; start += STORAGE_REMOVE_CHUNK_SIZE) {
           const chunk = bucketRows.slice(start, start + STORAGE_REMOVE_CHUNK_SIZE)
+          // A thrown or returned Storage error does not prove whether the request
+          // reached the server, so the database check below decides what to ack.
           try {
-            const { data: removed, error: removeError } = await this.client.storage.from(bucket).remove(chunk.map((row) => row.path))
-            if (removeError) throw removeError
-            const returnedPaths = new Set((removed ?? []).map((item) => item.name))
-            const confirmed = chunk.filter((row) => returnedPaths.has(row.path))
-            if (confirmed.length) {
-              const { error: queueError } = await this.client.from('storage_cleanup_queue')
-                .delete()
-                .eq('owner_id', ownerId)
-                .in('id', confirmed.map((row) => row.id))
-              if (queueError) throw queueError
-            }
-            pending += chunk.length - confirmed.length
+            await this.client.storage.from(bucket).remove(chunk.map((row) => row.path))
+          } catch {
+            // Fall through to the owner-scoped absence check.
+          }
+          try {
+            const chunkIds = new Set(chunk.map((row) => row.id))
+            const { error: queueError } = await this.client.rpc('acknowledge_storage_cleanup', {
+              p_queue_ids: [...chunkIds],
+            })
+            if (queueError) throw queueError
+            // Another drain can acknowledge the same row while this request is
+            // waiting for the RPC lock. Re-read the owner-scoped queue instead
+            // of deriving pending work from this call's acknowledgement count.
+            const { data: remaining, error: remainingError } = await this.client.from('storage_cleanup_queue')
+              .select('id')
+              .eq('owner_id', ownerId)
+              .in('id', [...chunkIds])
+            if (remainingError) throw remainingError
+            const remainingIds = new Set(
+              ((remaining ?? []) as Array<{ id?: unknown }>)
+                .map((row) => row.id)
+                .filter((id): id is number => typeof id === 'number' && chunkIds.has(id)),
+            )
+            pending += remainingIds.size
           } catch {
             pending += chunk.length
           }
         }
       }
       pending += rows.filter((row) => row.bucket !== ORIGINALS_BUCKET && row.bucket !== THUMBNAILS_BUCKET).length
-      if (rows.length < CLEANUP_PAGE_SIZE) break
     }
 
     return pending

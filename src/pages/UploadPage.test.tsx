@@ -132,6 +132,28 @@ describe('UploadPage', () => {
     ])
   })
 
+  it('keeps a successful upload result and reports when the following snapshot refresh fails', async () => {
+    const user = userEvent.setup()
+    const submitImport = vi.fn().mockResolvedValue({ status: 'complete', uploaded: 1, failures: [] })
+    const repository: LibraryRepository = {
+      mode: 'cloud',
+      getSnapshot: vi.fn()
+        .mockResolvedValueOnce({ games: [], captureSets: [], modules: [], images: [] })
+        .mockRejectedValueOnce(new Error('云端快照刷新失败')),
+      submitImport,
+    }
+    render(<App repository={repository} />)
+
+    await user.upload(
+      await screen.findByLabelText('选择游戏图片文件夹'),
+      folderFile('IDOL/home首页.png'),
+    )
+    await user.click(await screen.findByRole('button', { name: '上传 1 张图片' }))
+
+    expect(await screen.findByText('已完成上传 1 张图片')).toBeInTheDocument()
+    expect(await screen.findByRole('alert')).toHaveTextContent('资料库刷新失败，当前内容可能不是最新：云端快照刷新失败')
+  })
+
   it('generates at most three thumbnails concurrently', async () => {
     const user = userEvent.setup()
     const pending: Array<(thumbnail: ThumbnailBlob) => void> = []

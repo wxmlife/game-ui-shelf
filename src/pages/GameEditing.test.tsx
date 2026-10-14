@@ -123,10 +123,17 @@ describe('game image management', () => {
 
   it.each(['complete', 'reject'] as const)('ignores an old game request that finishes with %s after navigation', async (outcome) => {
     const user = userEvent.setup()
-    const { repository } = twoGameFixture()
+    const { repository, snapshot } = twoGameFixture()
     let finish!: () => void
     repository.moveImage = vi.fn(() => new Promise<MutationResult>((resolve, reject) => {
-      finish = () => outcome === 'complete' ? resolve({ status: 'complete' }) : reject(new Error('旧游戏移动失败'))
+      finish = () => {
+        if (outcome === 'complete') {
+          snapshot.images.find((image) => image.id === 'image-0')!.moduleId = 'module-2'
+          resolve({ status: 'complete' })
+        } else {
+          reject(new Error('旧游戏移动失败'))
+        }
+      }
     }))
     render(<App repository={repository} />)
     await user.click(await screen.findByRole('button', { name: '移动 图片甲 到模块' }))
@@ -139,6 +146,86 @@ describe('game image management', () => {
     await act(async () => finish())
     expect(screen.getByRole('dialog', { name: '移动到模块' })).toHaveTextContent('另一图片')
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    if (outcome === 'complete') {
+      await waitFor(() => expect(repository.getSnapshot).toHaveBeenCalledTimes(2))
+      expect(screen.getByRole('dialog', { name: '移动到模块' })).toHaveTextContent('另一图片')
+      await act(async () => { window.location.hash = '#/game/game' })
+      expect(await within(await screen.findByRole('region', { name: '空模块' })).findByRole('button', { name: '查看 图片甲' })).toBeInTheDocument()
+    } else {
+      expect(repository.getSnapshot).toHaveBeenCalledTimes(1)
+    }
+  })
+
+  it('refreshes the shared snapshot after a deletion succeeds on a route that was left', async () => {
+    const user = userEvent.setup()
+    const { repository, snapshot } = twoGameFixture()
+    let finishDelete!: () => void
+    let finishRefresh!: () => void
+    let snapshotRead = 0
+    repository.getSnapshot = vi.fn(() => {
+      snapshotRead += 1
+      if (snapshotRead === 1) return Promise.resolve(structuredClone(snapshot))
+      return new Promise<LibrarySnapshot>((resolve) => {
+        finishRefresh = () => resolve(structuredClone(snapshot))
+      })
+    })
+    repository.deleteImages = vi.fn((ids: string[]) => new Promise<MutationResult>((resolve) => {
+      finishDelete = () => {
+        snapshot.images = snapshot.images.filter((image) => !ids.includes(image.id))
+        resolve({ status: 'complete' })
+      }
+    }))
+    render(<App repository={repository} />)
+    await user.click(await screen.findByRole('checkbox', { name: '选择 图片甲' }))
+    await user.click(screen.getByRole('button', { name: '删除已选' }))
+    await user.click(screen.getByRole('button', { name: '确认删除' }))
+
+    await act(async () => { window.location.hash = '#/game/game-b' })
+    await screen.findByRole('heading', { name: '另一游戏' })
+    await user.click(screen.getByRole('button', { name: '删除游戏' }))
+    await user.type(screen.getByRole('textbox', { name: '输入完整游戏名称' }), '另一')
+
+    await act(async () => finishDelete())
+
+    await waitFor(() => expect(repository.getSnapshot).toHaveBeenCalledTimes(2))
+    expect(screen.getByRole('textbox', { name: '输入完整游戏名称' })).toHaveValue('另一')
+    await act(async () => finishRefresh())
+    await waitFor(() => expect(screen.getByRole('textbox', { name: '输入完整游戏名称' })).toHaveValue('另一'))
+    await act(async () => { window.location.hash = '#/game/game' })
+    await screen.findByRole('heading', { name: '测试游戏' })
+    expect(screen.queryByRole('button', { name: '查看 图片甲' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '查看 图片乙' })).toBeInTheDocument()
+  })
+
+  it('refreshes shared metadata after an edit succeeds without overwriting the new route state', async () => {
+    const user = userEvent.setup()
+    const { repository, snapshot } = twoGameFixture()
+    let finishEdit!: () => void
+    repository.updateImageMetadata = vi.fn((imageId, update) => new Promise<MutationResult>((resolve) => {
+      finishEdit = () => {
+        snapshot.images.find((image) => image.id === imageId)!.title = update.title
+        resolve({ status: 'complete' })
+      }
+    }))
+    render(<App repository={repository} />)
+    await user.click(await screen.findByRole('button', { name: '查看 图片甲' }))
+    await user.click(screen.getByRole('button', { name: '编辑图片资料' }))
+    const title = screen.getByLabelText('图片标题')
+    await user.clear(title)
+    await user.type(title, '已更新图片')
+    await user.click(screen.getByRole('button', { name: '保存图片资料' }))
+
+    await act(async () => { window.location.hash = '#/game/game-b' })
+    await user.click(await screen.findByRole('checkbox', { name: '选择 另一图片' }))
+    expect(screen.getByRole('toolbar', { name: '图片批量管理' })).toHaveTextContent('已选 1 张')
+
+    await act(async () => finishEdit())
+
+    await waitFor(() => expect(repository.getSnapshot).toHaveBeenCalledTimes(2))
+    expect(screen.getByRole('toolbar', { name: '图片批量管理' })).toHaveTextContent('已选 1 张')
+    await act(async () => { window.location.hash = '#/game/game' })
+    expect(await screen.findByRole('button', { name: '查看 已更新图片' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '查看 图片甲' })).not.toBeInTheDocument()
   })
 
   it('preserves named demo flows separately from images without a flow', async () => {
@@ -205,6 +292,22 @@ describe('game image management', () => {
     expect(await screen.findByRole('heading', { name: '游戏书架' })).toBeInTheDocument()
     expect(repository.deleteGame).toHaveBeenCalledWith('game')
     expect(repository.getSnapshot).toHaveBeenCalledTimes(2)
+  })
+
+  it('keeps a refresh failure visible after a successful game deletion navigates away', async () => {
+    const user = userEvent.setup()
+    const { repository, snapshot } = managementFixture()
+    repository.getSnapshot = vi.fn()
+      .mockResolvedValueOnce(structuredClone(snapshot))
+      .mockRejectedValueOnce(new Error('云端快照刷新失败'))
+    render(<App repository={repository} />)
+
+    await user.click(await screen.findByRole('button', { name: '删除游戏' }))
+    await user.type(screen.getByRole('textbox', { name: '输入完整游戏名称' }), '测试游戏')
+    await user.click(screen.getByRole('button', { name: '确认删除' }))
+
+    expect(await screen.findByRole('heading', { name: '游戏书架' })).toBeInTheDocument()
+    expect(await screen.findByRole('alert')).toHaveTextContent('资料库刷新失败，当前内容可能不是最新：云端快照刷新失败')
   })
 
   it('opens movement with the keyboard, cancels with Escape, and treats the source as a no-op', async () => {

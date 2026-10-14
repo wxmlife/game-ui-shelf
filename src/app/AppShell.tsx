@@ -1,4 +1,4 @@
-import { BookOpen, Cloud, HardDrive, LogOut, Settings, Upload } from 'lucide-react'
+import { AlertCircle, BookOpen, Cloud, HardDrive, LogOut, Settings, Upload } from 'lucide-react'
 import { Link, NavLink, Outlet } from 'react-router-dom'
 
 import { SearchBox } from '../components/SearchBox'
@@ -9,7 +9,7 @@ interface AppShellProps {
 }
 
 export function AppShell({ repositoryMode }: AppShellProps) {
-  const { repository } = useLibrary()
+  const { repository, refreshError } = useLibrary()
 
   return (
     <div className="app-shell">
@@ -68,6 +68,12 @@ export function AppShell({ repositoryMode }: AppShellProps) {
       </aside>
 
       <div className="page-stage">
+        {refreshError && (
+          <div className="library-refresh-error" role="alert">
+            <AlertCircle size={18} />
+            <span>资料库刷新失败，当前内容可能不是最新：{refreshError}</span>
+          </div>
+        )}
         <Outlet />
       </div>
     </div>
