@@ -101,7 +101,7 @@ describe('parseImportFile', () => {
       moduleKey: 'shop',
       moduleName: 'shop',
       title: '兑换商店',
-      flowName: '兑换商店',
+      flowName: '',
       steps: ['兑换商店'],
       sequenceOrder: 2,
     })
@@ -137,7 +137,7 @@ describe('parseImportFile', () => {
       moduleKey: '公会',
       moduleName: '公会',
       title: '总部已解锁',
-      flowName: '总部已解锁',
+      flowName: '',
       sequenceOrder: 1,
       originalFilename: '公会_总部已解锁.jpg',
       valid: true,
@@ -155,7 +155,7 @@ describe('parseImportFile', () => {
     expect(result).toMatchObject({
       moduleName: '公会',
       title: '兑换商店界面',
-      flowName: '兑换商店界面',
+      flowName: '',
       sequenceOrder: 2,
     })
   })
@@ -169,7 +169,7 @@ describe('parseImportFile', () => {
     })
 
     expect(result.title).toBe('商店_兑换_3_预览')
-    expect(result.flowName).toBe('商店_兑换_3_预览')
+    expect(result.flowName).toBe('')
     expect(result.sequenceOrder).toBe(3)
   })
 
@@ -182,7 +182,7 @@ describe('parseImportFile', () => {
     })
 
     expect(result.title).toBe('商店_兑换')
-    expect(result.flowName).toBe('商店_兑换')
+    expect(result.flowName).toBe('')
     expect(result.sequenceOrder).toBe(3)
   })
 

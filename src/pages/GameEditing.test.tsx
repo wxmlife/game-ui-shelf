@@ -65,7 +65,9 @@ describe('game image management', () => {
       await user.selectOptions(screen.getByRole('combobox'), 'module-2')
       await user.click(screen.getByRole('button', { name: '确认移动' }))
     } else {
-      const dataTransfer = { setData: vi.fn(), effectAllowed: '' }
+      const dataTransfer = {
+        types: ['application/x-ui-image'], setData: vi.fn(), getData: () => 'image-0', effectAllowed: '', dropEffect: '',
+      }
       fireEvent.dragStart(handle, { dataTransfer })
       fireEvent.drop(screen.getByRole('region', { name: '空模块' }), { dataTransfer })
     }
@@ -228,14 +230,28 @@ describe('game image management', () => {
     expect(screen.queryByRole('button', { name: '查看 图片甲' })).not.toBeInTheDocument()
   })
 
-  it('preserves named demo flows separately from images without a flow', async () => {
+  it('merges singleton flows into the module grid while keeping real multi-image flows separate', async () => {
     const user = userEvent.setup()
     window.location.hash = '#/game/idol-empire'
     render(<App repository={demoRepository} />)
+
+    const taskModule = await screen.findByRole('region', { name: '任务' })
+    expect(taskModule.querySelectorAll('.image-grid')).toHaveLength(1)
+    expect(within(taskModule).queryByRole('heading', { name: '完成任务' })).not.toBeInTheDocument()
+    expect(within(taskModule).getAllByRole('button', { name: /查看 / }).map((button) => button.getAttribute('aria-label'))).toEqual([
+      '查看 任务列表',
+      '查看 任务完成',
+    ])
+
     await user.click(await screen.findByRole('button', { name: '查看 任务完成' }))
-    expect(screen.queryByRole('button', { name: '下一张' })).not.toBeInTheDocument()
+    expect(screen.getByRole('dialog')).toHaveTextContent('2 / 2')
+    await user.click(screen.getByRole('button', { name: '下一张' }))
+    expect(within(screen.getByRole('dialog')).getByRole('heading', { name: '任务列表' })).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: '关闭大图' }))
-    expect(screen.getByRole('heading', { name: '完成任务' })).toBeInTheDocument()
+
+    const rewardModule = screen.getByRole('region', { name: '奖励' })
+    expect(rewardModule.querySelectorAll('.image-grid')).toHaveLength(1)
+    expect(within(rewardModule).getByRole('heading', { name: '领取奖励' })).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: '查看 奖励入口' }))
     expect(screen.getByRole('dialog')).toHaveTextContent('1 / 3')
     await user.click(screen.getByRole('button', { name: '下一张' }))
@@ -307,7 +323,7 @@ describe('game image management', () => {
     const handle = await screen.findByRole('button', { name: '移动 图片甲 到模块' })
     expect(handle).toHaveAttribute('draggable', 'true')
     expect(screen.getByRole('button', { name: '查看 图片甲' })).not.toHaveAttribute('draggable', 'true')
-    const dataTransfer = { setData: vi.fn(), getData: () => 'image-0', effectAllowed: '' }
+    const dataTransfer = { setData: vi.fn(), getData: () => '', effectAllowed: '' }
     fireEvent.dragStart(handle, { dataTransfer })
     fireEvent.drop(screen.getByRole('region', { name: '源模块' }), { dataTransfer })
     expect(repository.moveImage).not.toHaveBeenCalled()
@@ -316,6 +332,73 @@ describe('game image management', () => {
     fireEvent.drop(screen.getByRole('region', { name: '空模块' }), { dataTransfer })
     await waitFor(() => expect(repository.moveImage).toHaveBeenCalledWith('image-0', 'module-2'))
     expect(await within(await screen.findByRole('region', { name: '源模块' })).findByText('这个模块还没有截图')).toBeInTheDocument()
+  })
+
+  it('uses the transfer payload on a sticky module chip even when React drag state is unavailable', async () => {
+    const { repository, snapshot } = managementFixture()
+    const updateImageMetadata = vi.fn(async () => ({ status: 'complete' as const }))
+    repository.updateImageMetadata = updateImageMetadata
+    const originalTitle = snapshot.images[0].title
+    const originalTags = [...snapshot.images[0].tags]
+    render(<App repository={repository} />)
+
+    const moduleNav = await screen.findByRole('navigation', { name: '模块目录' })
+    const targetChip = within(moduleNav).getByRole('link', { name: '空模块' })
+    const dataTransfer = {
+      types: ['application/x-ui-image'],
+      getData: vi.fn(() => 'image-0'),
+      dropEffect: '',
+    }
+
+    fireEvent.dragOver(targetChip, { dataTransfer })
+    expect(targetChip).toHaveClass('is-drop-target')
+    fireEvent.drop(targetChip, { dataTransfer })
+
+    await waitFor(() => expect(repository.moveImage).toHaveBeenCalledWith('image-0', 'module-2'))
+    expect(dataTransfer.getData).toHaveBeenCalledWith('application/x-ui-image')
+    expect(updateImageMetadata).not.toHaveBeenCalled()
+    expect(snapshot.images[0]).toMatchObject({ title: originalTitle, tags: originalTags })
+  })
+
+  it('scrolls to a module when its sticky navigation chip is clicked', async () => {
+    const user = userEvent.setup()
+    const { repository } = managementFixture()
+    render(<App repository={repository} />)
+
+    const targetModule = await screen.findByRole('region', { name: '目标模块' })
+    const scrollIntoView = vi.fn()
+    Object.defineProperty(targetModule, 'scrollIntoView', { configurable: true, value: scrollIntoView })
+    const moduleNav = screen.getByRole('navigation', { name: '模块目录' })
+
+    await user.click(within(moduleNav).getByRole('link', { name: '目标模块' }))
+
+    expect(scrollIntoView).toHaveBeenCalledWith({ behavior: 'smooth', block: 'start' })
+    expect(window.location.hash).toBe('#/game/game')
+  })
+
+  it('prefers the transfer payload over stale React drag state', async () => {
+    const { repository } = managementFixture()
+    render(<App repository={repository} />)
+
+    const staleHandle = await screen.findByRole('button', { name: '移动 图片甲 到模块' })
+    fireEvent.dragStart(staleHandle, {
+      dataTransfer: {
+        types: ['application/x-ui-image'],
+        setData: vi.fn(),
+        effectAllowed: '',
+      },
+    })
+
+    const targetChip = within(screen.getByRole('navigation', { name: '模块目录' })).getByRole('link', { name: '空模块' })
+    fireEvent.drop(targetChip, {
+      dataTransfer: {
+        types: ['application/x-ui-image'],
+        getData: () => 'image-1',
+      },
+    })
+
+    await waitFor(() => expect(repository.moveImage).toHaveBeenCalledWith('image-1', 'module-2'))
+    expect(repository.moveImage).not.toHaveBeenCalledWith('image-0', 'module-2')
   })
 
   it('keeps viewer navigation within module and flow ID even when flow names match', async () => {
@@ -331,7 +414,7 @@ describe('game image management', () => {
     expect(within(screen.getByRole('dialog')).getByRole('heading', { name: '图片甲' })).toBeInTheDocument()
   })
 
-  it('groups no-flow images in their module and orders sequence ties by creation time then ID', async () => {
+  it('groups no-flow and singleton-flow images while ordering sequence ties by creation time then ID', async () => {
     const user = userEvent.setup()
     const { repository, snapshot } = managementFixture()
     snapshot.images = [
@@ -342,7 +425,7 @@ describe('game image management', () => {
     ]
     render(<App repository={repository} />)
     await user.click(await screen.findByRole('button', { name: '查看 第一' }))
-    expect(screen.getByRole('dialog')).toHaveTextContent('1 / 3')
+    expect(screen.getByRole('dialog')).toHaveTextContent('1 / 4')
     await user.click(screen.getByRole('button', { name: '下一张' }))
     expect(within(screen.getByRole('dialog')).getByRole('heading', { name: '第二' })).toBeInTheDocument()
   })

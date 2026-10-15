@@ -136,7 +136,7 @@ export function UploadPage() {
         <div>
           <p className="eyebrow">FOLDER IMPORT</p>
           <h1>批量上传</h1>
-          <p className="hero-description">按“游戏文件夹 / 模块+中文名-动作步骤”的方式命名，系统会自动整理成可搜索的交互序列。</p>
+          <p className="hero-description">按“游戏文件夹 / 大模块_图片内容名称_可选顺序”命名，系统会自动归类并生成可搜索标签。</p>
         </div>
         <div className="upload-rule-card">
           <ShieldCheck size={18} />
@@ -146,9 +146,9 @@ export function UploadPage() {
 
       <div className="naming-guide">
         <span>推荐命名</span>
-        <code>IDOL / reward奖励-奖励详情.png</code>
+        <code>IDOL / 公会_抽奖未领取奖励_2.png</code>
         <ArrowRight size={15} />
-        <strong>奖励模块 · 奖励详情</strong>
+        <strong>公会模块 · 抽奖未领取奖励 · 顺序 2</strong>
       </div>
 
       <UploadDropzone onSelect={selectFiles} />

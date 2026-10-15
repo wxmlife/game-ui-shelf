@@ -61,6 +61,7 @@ export interface LibraryRepository {
   submitImport(draft: ImportSubmission): Promise<UploadBatchResult>
   updateModule?(moduleId: string, update: ModuleUpdate): Promise<MutationResult>
   updateImageMetadata?(imageId: string, update: ImageMetadataUpdate): Promise<MutationResult>
+  setGameCoverFromImage?(gameId: string, imageId: string): Promise<MutationResult>
   moveImage?(imageId: string, targetModuleId: string): Promise<MutationResult>
   deleteImages?(imageIds: string[]): Promise<MutationResult>
   deleteGame?(gameId: string): Promise<MutationResult>

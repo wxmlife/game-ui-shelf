@@ -74,7 +74,7 @@ export function parseImportFile(input: ImportFileInput): ParsedImportFile {
       underscoreOrder = Number.parseInt(titleParts.pop()!, 10)
     }
     title = titleParts.join('_').trim() || module.name
-    flowName = title
+    flowName = ''
     steps = [title]
   } else {
     const segments = cleanStem

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
@@ -31,6 +31,51 @@ describe('ImageViewer', () => {
     render(<ImageViewer images={[image]} initialImageId={image.id} onClose={vi.fn()} />)
 
     expect(screen.getByRole('link', { name: '下载原图' })).toHaveAttribute('href', image.downloadUrl)
+  })
+
+  it('sets the current screenshot as the game cover and prevents duplicate submissions while saving', async () => {
+    const user = userEvent.setup()
+    let finish!: () => void
+    const onSetCover = vi.fn(() => new Promise<void>((resolve) => { finish = resolve }))
+
+    render(
+      <ImageViewer
+        images={images}
+        initialImageId={images[0].id}
+        onClose={vi.fn()}
+        onSetCover={onSetCover}
+      />,
+    )
+
+    const button = screen.getByRole('button', { name: '设为游戏封面' })
+    await user.dblClick(button)
+
+    expect(onSetCover).toHaveBeenCalledOnce()
+    expect(onSetCover).toHaveBeenCalledWith(images[0])
+    expect(screen.getByRole('button', { name: '设置中…' })).toBeDisabled()
+
+    await act(async () => finish())
+    expect(screen.getByRole('button', { name: '设为游戏封面' })).toBeEnabled()
+  })
+
+  it('keeps the viewer open and shows a retryable error when setting the cover fails', async () => {
+    const user = userEvent.setup()
+    const onSetCover = vi.fn(async () => { throw new Error('封面设置失败') })
+
+    render(
+      <ImageViewer
+        images={images}
+        initialImageId={images[0].id}
+        onClose={vi.fn()}
+        onSetCover={onSetCover}
+      />,
+    )
+
+    await user.click(screen.getByRole('button', { name: '设为游戏封面' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('封面设置失败')
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '设为游戏封面' })).toBeEnabled()
   })
 })
 

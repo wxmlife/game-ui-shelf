@@ -79,13 +79,14 @@ describe('bookshelf game management', () => {
     await enterManagement(user)
     expect(screen.getByRole('button', { name: '删除游戏 游戏甲' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '删除游戏 游戏乙' })).toBeInTheDocument()
+    expect(screen.queryByText(/输入完整游戏名称/)).not.toBeInTheDocument()
 
     await user.click(screen.getByRole('link', { name: '打开 游戏甲' }))
     expect(await screen.findByRole('heading', { name: '游戏甲' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '删除游戏' })).not.toBeInTheDocument()
   })
 
-  it('requires the exact full game name, deletes only that shelf card, and restores focus', async () => {
+  it('confirms a whole-game deletion directly, focuses confirmation, deletes only that shelf card, and restores focus', async () => {
     const user = userEvent.setup()
     const { repository } = shelfFixture()
     render(<App repository={repository} />)
@@ -95,11 +96,11 @@ describe('bookshelf game management', () => {
     const dialog = screen.getByRole('alertdialog', { name: '删除游戏确认' })
     expect(dialog).toHaveTextContent('游戏「游戏甲」')
     expect(dialog).toHaveTextContent('2 张图片')
-    const name = screen.getByRole('textbox', { name: '输入完整游戏名称' })
-    await user.type(name, '游戏')
-    expect(screen.getByRole('button', { name: '确认删除' })).toBeDisabled()
-    await user.type(name, '甲')
-    await user.click(screen.getByRole('button', { name: '确认删除' }))
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument()
+    const confirm = screen.getByRole('button', { name: '确认删除' })
+    expect(confirm).toBeEnabled()
+    expect(confirm).toHaveFocus()
+    await user.click(confirm)
 
     await waitFor(() => expect(screen.queryByRole('link', { name: '打开 游戏甲' })).not.toBeInTheDocument())
     expect(screen.getByRole('link', { name: '打开 游戏乙' })).toBeInTheDocument()
@@ -107,6 +108,26 @@ describe('bookshelf game management', () => {
     expect(repository.deleteGame).toHaveBeenCalledWith('game-a')
     expect(repository.getSnapshot).toHaveBeenCalledTimes(2)
     expect(manage).toHaveFocus()
+  })
+
+  it('cancels with either Escape or the cancel button without deleting and restores focus', async () => {
+    const user = userEvent.setup()
+    const { repository } = shelfFixture()
+    render(<App repository={repository} />)
+
+    await enterManagement(user)
+    const deleteGame = screen.getByRole('button', { name: '删除游戏 游戏甲' })
+    await user.click(deleteGame)
+    await user.keyboard('{Escape}')
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+    expect(repository.deleteGame).not.toHaveBeenCalled()
+    expect(deleteGame).toHaveFocus()
+
+    await user.click(deleteGame)
+    await user.click(screen.getByRole('button', { name: '取消' }))
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+    expect(repository.deleteGame).not.toHaveBeenCalled()
+    expect(deleteGame).toHaveFocus()
   })
 
   it('keeps a failed deletion in its dialog so it can be retried safely', async () => {
@@ -124,7 +145,6 @@ describe('bookshelf game management', () => {
 
     await enterManagement(user)
     await user.click(screen.getByRole('button', { name: '删除游戏 游戏甲' }))
-    await user.type(screen.getByRole('textbox', { name: '输入完整游戏名称' }), '游戏甲')
     await user.click(screen.getByRole('button', { name: '确认删除' }))
 
     expect(await screen.findByRole('alert')).toHaveTextContent('删除游戏失败')
@@ -151,7 +171,6 @@ describe('bookshelf game management', () => {
 
     await enterManagement(user)
     await user.click(screen.getByRole('button', { name: '删除游戏 游戏甲' }))
-    await user.type(screen.getByRole('textbox', { name: '输入完整游戏名称' }), '游戏甲')
     await user.click(screen.getByRole('button', { name: '确认删除' }))
 
     await user.click(screen.getByRole('button', { name: '离开书架' }))
@@ -181,7 +200,6 @@ describe('bookshelf game management', () => {
 
     await enterManagement(user)
     await user.click(screen.getByRole('button', { name: '删除游戏 游戏甲' }))
-    await user.type(screen.getByRole('textbox', { name: '输入完整游戏名称' }), '游戏甲')
     await user.click(screen.getByRole('button', { name: '确认删除' }))
 
     expect(await screen.findByRole('status')).toHaveTextContent('游戏已删除，1 个文件等待清理')

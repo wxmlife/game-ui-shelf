@@ -111,7 +111,100 @@ function mutationClient(
       }),
     })) },
   }
-  return { client, rpc, queue, calls }
+  return { client, rpc, queue, calls, storageObjects }
+}
+
+function coverClient(options: {
+  image?: { id: string; owner_id: string; game_id: string; thumbnail_path: string | null }
+  copyError?: Error
+  copyThrows?: Error
+  copyCreatesBeforeFailure?: boolean
+  rpcError?: { message: string; code: string }
+  loseRpcResponse?: boolean
+  unknownRpcFailure?: boolean
+  coverReadError?: boolean
+  cleanupFails?: boolean
+  queueWriteFails?: boolean
+} = {}) {
+  const fixture = mutationClient([], () => options.cleanupFails ?? false)
+  const image = options.image ?? {
+    id: 'image-1', owner_id: 'user-1', game_id: 'game-1', thumbnail_path: 'user-1/game-1/image-1/thumbnail.webp',
+  }
+  const game = {
+    id: 'game-1', owner_id: 'user-1',
+    cover_thumbnail_path: 'user-1/game-1/covers/old/thumbnail.webp',
+    cover_original_path: 'user-1/game-1/covers/old/original.png' as string | null,
+  }
+  for (const [bucket, path] of [
+    ['game-ui-originals', game.cover_original_path],
+    ['game-ui-thumbnails', game.cover_thumbnail_path],
+    ['game-ui-thumbnails', image.thumbnail_path],
+  ]) {
+    if (path) fixture.storageObjects.add(`${bucket}:${path}`)
+  }
+  const copies: Array<{ bucket: string; from: string; to: string }> = []
+  const cleanupFrom = fixture.client.from
+  const cleanupStorageFrom = fixture.client.storage.from
+  const cleanupRpc = fixture.rpc
+  const client = {
+    ...fixture.client,
+    from: vi.fn((table: string) => {
+      if (table === 'storage_cleanup_queue') return {
+        ...cleanupFrom(table),
+        upsert: vi.fn(async (row: Omit<CleanupRow, 'id'>, settings: { onConflict: string; ignoreDuplicates: boolean }) => {
+          if (options.queueWriteFails) return { data: null, error: new Error('queue unavailable') }
+          if (settings.onConflict !== 'owner_id,bucket,path' || !settings.ignoreDuplicates) {
+            return { data: null, error: new Error('Queue update privilege is not granted') }
+          }
+          if (!fixture.queue.some((item) => item.owner_id === row.owner_id && item.bucket === row.bucket && item.path === row.path)) {
+            fixture.queue.push({ ...row, id: fixture.queue.reduce((max, item) => Math.max(max, item.id), 0) + 1 })
+          }
+          return { data: null, error: null }
+        }),
+      }
+      if (table !== 'ui_images' && table !== 'games') throw new Error(`Unexpected table ${table}`)
+      const row = table === 'ui_images' ? image : game
+      const filters: Record<string, unknown> = {}
+      const query = {
+        eq: vi.fn((column: string, value: unknown) => { filters[column] = value; return query }),
+        maybeSingle: vi.fn(async () => ({
+          data: Object.entries(filters).every(([key, value]) => row[key as keyof typeof row] === value) ? { ...row } : null,
+          error: table === 'games' && options.coverReadError ? new Error('read unavailable') : null,
+        })),
+      }
+      return { select: vi.fn(() => query) }
+    }),
+    rpc: vi.fn(async (name: string, args: Record<string, unknown>) => {
+      if (name !== 'set_game_cover_from_image') return cleanupRpc(name, args)
+      if (options.rpcError) return { data: null, error: options.rpcError }
+      if (options.unknownRpcFailure) throw new Error('connection lost')
+      const newPath = args.p_cover_thumbnail_path as string
+      if (!fixture.storageObjects.has(`game-ui-thumbnails:${newPath}`)) throw new Error('Cover was not copied before the RPC')
+      const nextId = fixture.queue.reduce((max, row) => Math.max(max, row.id), 0) + 1
+      fixture.queue.push({ id: nextId, owner_id: 'user-1', bucket: 'game-ui-thumbnails', path: game.cover_thumbnail_path })
+      if (game.cover_original_path) {
+        fixture.queue.push({ id: nextId + 1, owner_id: 'user-1', bucket: 'game-ui-originals', path: game.cover_original_path })
+      }
+      game.cover_thumbnail_path = newPath
+      game.cover_original_path = null
+      if (options.loseRpcResponse) throw new Error('connection lost')
+      return { data: null, error: null }
+    }),
+    storage: { from: vi.fn((bucket: string) => ({
+      ...cleanupStorageFrom(bucket),
+      copy: vi.fn(async (from: string, to: string) => {
+        copies.push({ bucket, from, to })
+        if (options.copyCreatesBeforeFailure) fixture.storageObjects.add(`${bucket}:${to}`)
+        if (options.copyThrows) throw options.copyThrows
+        if (options.copyError) return { data: null, error: options.copyError }
+        if (!fixture.storageObjects.has(`${bucket}:${from}`)) return { data: null, error: new Error('Source not found') }
+        if (fixture.storageObjects.has(`${bucket}:${to}`)) return { data: null, error: new Error('Destination exists') }
+        fixture.storageObjects.add(`${bucket}:${to}`)
+        return { data: { path: to }, error: null }
+      }),
+    })) },
+  }
+  return { ...fixture, client, game, image, copies }
 }
 
 describe('SupabaseLibraryRepository', () => {
@@ -328,6 +421,219 @@ describe('SupabaseLibraryRepository', () => {
       p_image_id: 'image-1', p_target_module_id: 'module-2',
     })
     expect(calls).toEqual([])
+  })
+
+  it('copies an existing thumbnail into an independent cover before the atomic update and cleans old covers', async () => {
+    const { client, copies, game, image, storageObjects, queue } = coverClient()
+    const repository = new SupabaseLibraryRepository(client as never)
+
+    const result = await repository.setGameCoverFromImage('game-1', 'image-1')
+
+    expect(result).toEqual({ status: 'complete', pendingCleanup: 0 })
+    expect(copies).toEqual([{
+      bucket: 'game-ui-thumbnails', from: 'user-1/game-1/image-1/thumbnail.webp',
+      to: expect.stringMatching(/^user-1\/game-1\/covers\/[^/]+\/thumbnail\.webp$/),
+    }])
+    expect(client.rpc).toHaveBeenCalledWith('set_game_cover_from_image', {
+      p_game_id: 'game-1', p_image_id: 'image-1', p_cover_thumbnail_path: copies[0].to,
+    })
+    expect(game.cover_original_path).toBeNull()
+    expect(game.cover_thumbnail_path).toBe(copies[0].to)
+    expect(queue).toEqual([])
+    expect(storageObjects).toEqual(new Set([
+      `game-ui-thumbnails:${image.thumbnail_path}`,
+      `game-ui-thumbnails:${copies[0].to}`,
+    ]))
+  })
+
+  it('uses a fresh cover path for each replacement and never removes the source screenshot', async () => {
+    const { client, copies, image, storageObjects } = coverClient()
+    const repository = new SupabaseLibraryRepository(client as never)
+
+    await repository.setGameCoverFromImage('game-1', 'image-1')
+    await repository.setGameCoverFromImage('game-1', 'image-1')
+
+    expect(copies).toHaveLength(2)
+    expect(copies[0].to).not.toBe(copies[1].to)
+    expect(storageObjects).toEqual(new Set([
+      `game-ui-thumbnails:${image.thumbnail_path}`, `game-ui-thumbnails:${copies[1].to}`,
+    ]))
+  })
+
+  it.each([
+    { owner_id: 'user-2', game_id: 'game-1' },
+    { owner_id: 'user-1', game_id: 'game-2' },
+  ])('rejects an image outside the authenticated game before copying: %j', async (scope) => {
+    const { client, copies } = coverClient({
+      image: { id: 'image-1', ...scope, thumbnail_path: `${scope.owner_id}/${scope.game_id}/image-1/thumbnail.webp` },
+    })
+    const repository = new SupabaseLibraryRepository(client as never)
+
+    await expect(repository.setGameCoverFromImage('game-1', 'image-1')).rejects.toThrow(/图片不存在|当前游戏/)
+
+    expect(copies).toEqual([])
+    expect(client.rpc).not.toHaveBeenCalled()
+  })
+
+  it('rejects a screenshot without a thumbnail with an actionable error', async () => {
+    const { client, copies } = coverClient({
+      image: { id: 'image-1', owner_id: 'user-1', game_id: 'game-1', thumbnail_path: null },
+    })
+    const repository = new SupabaseLibraryRepository(client as never)
+
+    await expect(repository.setGameCoverFromImage('game-1', 'image-1')).rejects.toThrow(/没有缩略图/)
+
+    expect(copies).toEqual([])
+    expect(client.rpc).not.toHaveBeenCalled()
+  })
+
+  it('does not change metadata or remove existing covers when the copy fails', async () => {
+    const { client, game, calls } = coverClient({ copyError: new Error('storage full') })
+    const repository = new SupabaseLibraryRepository(client as never)
+
+    await expect(repository.setGameCoverFromImage('game-1', 'image-1')).rejects.toThrow('storage full')
+
+    expect(client.rpc).not.toHaveBeenCalled()
+    expect(game.cover_thumbnail_path).toBe('user-1/game-1/covers/old/thumbnail.webp')
+    expect(calls).toEqual([])
+  })
+
+  it.each([
+    ['returns an error', { copyError: new Error('copy response failed') }],
+    ['throws', { copyThrows: new Error('copy connection failed') }],
+  ])('durably queues the unique cover path without draining when Storage copy %s', async (_case, failure) => {
+    const { client, copies, queue, calls, storageObjects } = coverClient({
+      ...failure, copyCreatesBeforeFailure: true,
+    })
+    const repository = new SupabaseLibraryRepository(client as never)
+
+    await expect(repository.setGameCoverFromImage('game-1', 'image-1')).rejects.toThrow(/copy (response|connection) failed/)
+
+    expect(client.rpc).not.toHaveBeenCalledWith('set_game_cover_from_image', expect.anything())
+    expect(queue).toEqual([{
+      id: 1, owner_id: 'user-1', bucket: 'game-ui-thumbnails', path: copies[0].to,
+    }])
+    expect(calls).toEqual([])
+    expect(storageObjects.has(`game-ui-thumbnails:${copies[0].to}`)).toBe(true)
+  })
+
+  it('compensates only the new copy when the database rejects the cover change', async () => {
+    const { client, copies, game, calls, storageObjects } = coverClient({ rpcError: { message: 'Image not found', code: 'P0002' } })
+    const repository = new SupabaseLibraryRepository(client as never)
+
+    await expect(repository.setGameCoverFromImage('game-1', 'image-1')).rejects.toMatchObject({ message: 'Image not found' })
+
+    expect(calls).toEqual([{ bucket: 'game-ui-thumbnails', paths: [copies[0].to] }])
+    expect(game.cover_thumbnail_path).toBe('user-1/game-1/covers/old/thumbnail.webp')
+    expect(storageObjects.has(`game-ui-thumbnails:${copies[0].to}`)).toBe(false)
+    expect(storageObjects.has('game-ui-thumbnails:user-1/game-1/image-1/thumbnail.webp')).toBe(true)
+  })
+
+  it('treats a PGRST3xx RPC error as a confirmed rejection and compensates the new copy', async () => {
+    const { client, copies, queue, calls, storageObjects } = coverClient({
+      rpcError: { message: 'JWT expired', code: 'PGRST301' },
+    })
+    const repository = new SupabaseLibraryRepository(client as never)
+
+    await expect(repository.setGameCoverFromImage('game-1', 'image-1')).rejects.toMatchObject({
+      message: 'JWT expired', code: 'PGRST301',
+    })
+
+    expect(calls).toEqual([{ bucket: 'game-ui-thumbnails', paths: [copies[0].to] }])
+    expect(queue).toEqual([])
+    expect(storageObjects.has(`game-ui-thumbnails:${copies[0].to}`)).toBe(false)
+  })
+
+  it('preserves the new cover and returns a cover-specific partial result when old-cover cleanup fails', async () => {
+    const { client, copies, game, storageObjects, queue } = coverClient({ cleanupFails: true })
+    const repository = new SupabaseLibraryRepository(client as never)
+
+    const result = await repository.setGameCoverFromImage('game-1', 'image-1')
+
+    expect(result).toMatchObject({ status: 'partial', pendingCleanup: 2, message: expect.stringContaining('封面已更新') })
+    expect(game.cover_thumbnail_path).toBe(copies[0].to)
+    expect(storageObjects.has(`game-ui-thumbnails:${copies[0].to}`)).toBe(true)
+    expect(queue).toHaveLength(2)
+    expect(queue.every((row) => row.path !== copies[0].to)).toBe(true)
+  })
+
+  it('durably queues a rejected cover copy when compensating Storage removal fails', async () => {
+    const { client, copies, queue, game } = coverClient({
+      rpcError: { message: 'Image not found', code: 'P0002' }, cleanupFails: true,
+    })
+    const repository = new SupabaseLibraryRepository(client as never)
+
+    await expect(repository.setGameCoverFromImage('game-1', 'image-1')).rejects.toMatchObject({ message: 'Image not found' })
+
+    expect(game.cover_thumbnail_path).toBe('user-1/game-1/covers/old/thumbnail.webp')
+    expect(queue).toEqual([{
+      id: 1, owner_id: 'user-1', bucket: 'game-ui-thumbnails', path: copies[0].to,
+    }])
+  })
+
+  it('falls back to direct compensation when a rejected cover copy cannot be queued', async () => {
+    const { client, copies, queue, storageObjects } = coverClient({
+      rpcError: { message: 'Image not found', code: 'P0002' }, queueWriteFails: true,
+    })
+    const repository = new SupabaseLibraryRepository(client as never)
+
+    await expect(repository.setGameCoverFromImage('game-1', 'image-1')).rejects.toMatchObject({ message: 'Image not found' })
+
+    expect(queue).toEqual([])
+    expect(storageObjects.has(`game-ui-thumbnails:${copies[0].to}`)).toBe(false)
+  })
+
+  it('reports an uncompensated copy if both durable queueing and direct removal fail', async () => {
+    const { client } = coverClient({
+      rpcError: { message: 'Image not found', code: 'P0002' }, queueWriteFails: true, cleanupFails: true,
+    })
+    const repository = new SupabaseLibraryRepository(client as never)
+
+    await expect(repository.setGameCoverFromImage('game-1', 'image-1')).rejects.toThrow(/Image not found.*副本清理未完成/)
+  })
+
+  it('does not delete an already committed cover when its RPC response is lost', async () => {
+    const { client, copies, game, storageObjects } = coverClient({ loseRpcResponse: true })
+    const repository = new SupabaseLibraryRepository(client as never)
+
+    const result = await repository.setGameCoverFromImage('game-1', 'image-1')
+
+    expect(result.status).toBe('complete')
+    expect(game.cover_thumbnail_path).toBe(copies[0].to)
+    expect(storageObjects.has(`game-ui-thumbnails:${copies[0].to}`)).toBe(true)
+  })
+
+  it.each([false, true])('keeps an unconfirmed copy rather than risk deleting a late commit (cover read fails: %s)', async (coverReadError) => {
+    const { client, copies, calls, storageObjects } = coverClient({ unknownRpcFailure: true, coverReadError })
+    const repository = new SupabaseLibraryRepository(client as never)
+
+    await expect(repository.setGameCoverFromImage('game-1', 'image-1')).rejects.toThrow(/未确认.*重试/)
+
+    expect(calls).toEqual([])
+    expect(storageObjects.has(`game-ui-thumbnails:${copies[0].to}`)).toBe(true)
+  })
+
+  it('refuses to set a cover without an authenticated session', async () => {
+    const { client, copies } = coverClient()
+    client.auth.getSession.mockResolvedValue({ data: { session: null }, error: null } as never)
+    const repository = new SupabaseLibraryRepository(client as never)
+
+    await expect(repository.setGameCoverFromImage('game-1', 'image-1')).rejects.toThrow('请先登录')
+
+    expect(copies).toEqual([])
+    expect(client.rpc).not.toHaveBeenCalled()
+  })
+
+  it('rejects a thumbnail path outside its owner and game even if the row belongs to this game', async () => {
+    const { client, copies } = coverClient({
+      image: { id: 'image-1', owner_id: 'user-1', game_id: 'game-1', thumbnail_path: 'user-1/game-2/image-2/thumbnail.webp' },
+    })
+    const repository = new SupabaseLibraryRepository(client as never)
+
+    await expect(repository.setGameCoverFromImage('game-1', 'image-1')).rejects.toThrow(/缩略图路径/)
+
+    expect(copies).toEqual([])
+    expect(client.rpc).not.toHaveBeenCalled()
   })
 
   it('deletes a single image with one transactional RPC', async () => {

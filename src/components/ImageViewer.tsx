@@ -1,4 +1,4 @@
-import { ArrowLeft, ArrowRight, Download, LoaderCircle, Pencil, Trash2, X } from 'lucide-react'
+import { ArrowLeft, ArrowRight, Download, ImagePlus, LoaderCircle, Pencil, Trash2, X } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 
 import type { UiImage } from '../domain/models'
@@ -9,6 +9,7 @@ interface ImageViewerProps {
   initialImageId: string
   onClose: () => void
   onSaveMetadata?: (imageId: string, update: ImageMetadataUpdate) => Promise<void>
+  onSetCover?: (image: UiImage) => Promise<void>
   onDelete?: (image: UiImage) => void
   suspended?: boolean
 }
@@ -22,7 +23,7 @@ function isEditableTarget(target: EventTarget | null) {
   return Boolean(target.closest('[contenteditable]:not([contenteditable="false"])'))
 }
 
-export function ImageViewer({ images, initialImageId, onClose, onSaveMetadata, onDelete, suspended }: ImageViewerProps) {
+export function ImageViewer({ images, initialImageId, onClose, onSaveMetadata, onSetCover, onDelete, suspended }: ImageViewerProps) {
   const initialIndex = Math.max(0, images.findIndex((image) => image.id === initialImageId))
   const [index, setIndex] = useState(initialIndex)
   const image = images[index]
@@ -33,6 +34,8 @@ export function ImageViewer({ images, initialImageId, onClose, onSaveMetadata, o
   const [tags, setTags] = useState('')
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
+  const [coverSaving, setCoverSaving] = useState(false)
+  const [coverError, setCoverError] = useState<string | null>(null)
   const canMove = images.length > 1
   const positionLabel = useMemo(() => `${index + 1} / ${images.length}`, [index, images.length])
 
@@ -65,6 +68,7 @@ export function ImageViewer({ images, initialImageId, onClose, onSaveMetadata, o
   useEffect(() => {
     setEditing(false)
     setSaveError(null)
+    setCoverError(null)
   }, [image?.id])
 
   function beginEditing() {
@@ -92,6 +96,19 @@ export function ImageViewer({ images, initialImageId, onClose, onSaveMetadata, o
     } catch (caught) {
       setSaveError(caught instanceof Error ? caught.message : '图片资料保存失败')
       setSaving(false)
+    }
+  }
+
+  async function setAsCover() {
+    if (!image || !onSetCover || suspended || coverSaving) return
+    setCoverSaving(true)
+    setCoverError(null)
+    try {
+      await onSetCover(image)
+    } catch (caught) {
+      setCoverError(caught instanceof Error ? caught.message : '封面设置失败')
+    } finally {
+      setCoverSaving(false)
     }
   }
 
@@ -151,6 +168,13 @@ export function ImageViewer({ images, initialImageId, onClose, onSaveMetadata, o
             <div className="tag-row">
               {image.tags.map((tag) => <span className="tag" key={tag}>#{tag}</span>)}
             </div>
+            {coverError && <div className="editor-error" role="alert">{coverError}</div>}
+            {onSetCover && (
+              <button className="viewer-edit-button" type="button" disabled={suspended || coverSaving} onClick={() => void setAsCover()}>
+                {coverSaving ? <LoaderCircle className="spin" size={15} /> : <ImagePlus size={15} />}
+                {coverSaving ? '设置中…' : '设为游戏封面'}
+              </button>
+            )}
             {onSaveMetadata && <button className="viewer-edit-button" type="button" disabled={suspended} onClick={beginEditing}><Pencil size={15} /> 编辑图片资料</button>}
             {onDelete && <button className="viewer-edit-button danger-text" type="button" disabled={suspended} onClick={() => onDelete(image)}><Trash2 size={15} /> 删除图片</button>}
           </>

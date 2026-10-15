@@ -66,6 +66,14 @@ function errorMessage(error: unknown): string {
   return '上传失败'
 }
 
+function isConfirmedRpcRejection(error: unknown): boolean {
+  if (!error || typeof error !== 'object' || !('code' in error) || typeof error.code !== 'string') return false
+  // A SQL error rolls the transaction back. Connection errors (class 08) and
+  // unknown transport failures do not prove whether the commit reached us.
+  return (/^[0-9A-Z]{5}$/.test(error.code) && !error.code.startsWith('08'))
+    || /^PGRST[123][0-9]{2}$/.test(error.code)
+}
+
 export class SupabaseLibraryRepository implements LibraryRepository {
   readonly mode = 'cloud' as const
   private cleanupInFlight?: { ownerId: string; promise: Promise<void> }
@@ -175,14 +183,25 @@ export class SupabaseLibraryRepository implements LibraryRepository {
     this.cleanupInFlight = { ownerId, promise }
   }
 
-  private async cleanupResult(ownerId: string): Promise<MutationResult> {
+  private async cleanupResult(ownerId: string, successMessage = '资料已删除'): Promise<MutationResult> {
     try {
       const pendingCleanup = await this.drainCleanupQueue(ownerId)
       return pendingCleanup
-        ? { status: 'partial', pendingCleanup, message: '资料已删除，部分文件仍待清理，将在下次加载时重试' }
+        ? { status: 'partial', pendingCleanup, message: `${successMessage}，部分文件仍待清理，将在下次加载时重试` }
         : { status: 'complete', pendingCleanup: 0 }
     } catch {
-      return { status: 'partial', message: '资料已删除，文件清理将在下次加载时重试' }
+      return { status: 'partial', message: `${successMessage}，文件清理将在下次加载时重试` }
+    }
+  }
+
+  private async enqueueStorageCleanup(ownerId: string, bucket: string, path: string): Promise<boolean> {
+    try {
+      const { error } = await this.client.from('storage_cleanup_queue').upsert({
+        owner_id: ownerId, bucket, path,
+      }, { onConflict: 'owner_id,bucket,path', ignoreDuplicates: true })
+      return !error
+    } catch {
+      return false
     }
   }
 
@@ -456,6 +475,80 @@ export class SupabaseLibraryRepository implements LibraryRepository {
     })
     if (error) throw error
     return { status: 'complete' }
+  }
+
+  async setGameCoverFromImage(gameId: string, imageId: string): Promise<MutationResult> {
+    const ownerId = await this.userId()
+    const { data: image, error: imageError } = await this.client.from('ui_images')
+      .select('thumbnail_path')
+      .eq('id', imageId)
+      .eq('owner_id', ownerId)
+      .eq('game_id', gameId)
+      .maybeSingle()
+    if (imageError) throw imageError
+    if (!image) throw new Error('图片不存在或不属于当前游戏')
+    const thumbnailPath = text(image.thumbnail_path)
+    if (!thumbnailPath) throw new Error('这张图片没有缩略图，请重新上传生成缩略图后再设为封面')
+    if (!thumbnailPath.startsWith(`${ownerId}/${gameId}/`)) throw new Error('缩略图路径不属于当前账号和游戏')
+
+    const coverPath = `${ownerId}/${gameId}/covers/${uniqueId()}/thumbnail.${safeFileExtension(thumbnailPath)}`
+    let copyFailure: unknown
+    try {
+      const { error } = await this.client.storage.from(THUMBNAILS_BUCKET).copy(thumbnailPath, coverPath)
+      copyFailure = error
+    } catch (error) {
+      copyFailure = error
+    }
+    if (copyFailure) {
+      // Storage failures are ambiguous: the server may have copied the object
+      // before the response failed. Persist the unique destination for a later
+      // cleanup pass, but do not drain it in this request.
+      const queued = await this.enqueueStorageCleanup(ownerId, THUMBNAILS_BUCKET, coverPath)
+      if (!queued) throw new Error(`${errorMessage(copyFailure)}；封面副本清理任务保存失败，请稍后重试`)
+      throw copyFailure
+    }
+
+    try {
+      const { error } = await this.client.rpc('set_game_cover_from_image', {
+        p_game_id: gameId,
+        p_image_id: imageId,
+        p_cover_thumbnail_path: coverPath,
+      })
+      if (error) throw error
+    } catch (error) {
+      if (isConfirmedRpcRejection(error)) {
+        const queued = await this.enqueueStorageCleanup(ownerId, THUMBNAILS_BUCKET, coverPath)
+        if (queued) {
+          await this.cleanupResult(ownerId)
+        } else {
+          let removed = false
+          try {
+            const { data, error: removeError } = await this.client.storage.from(THUMBNAILS_BUCKET).remove([coverPath])
+            removed = !removeError && !!data?.some((object) => object.name === coverPath)
+          } catch {
+            // Keep the original error, but make an untracked orphan visible.
+          }
+          if (!removed) throw new Error(`${errorMessage(error)}；未使用的封面副本清理未完成，请稍后重试`)
+        }
+        throw error
+      }
+      // Losing the RPC response is not proof of rollback. Only treat the
+      // operation as successful when its unique copy is now authoritative;
+      // otherwise retain it, since a late commit may still reference it.
+      try {
+        const { data: game, error: readError } = await this.client.from('games')
+          .select('cover_thumbnail_path')
+          .eq('id', gameId)
+          .eq('owner_id', ownerId)
+          .maybeSingle()
+        if (!readError && game?.cover_thumbnail_path === coverPath) return this.cleanupResult(ownerId, '封面已更新')
+      } catch {
+        // No destructive compensation when the authoritative read also fails.
+      }
+      throw new Error(`封面更新结果未确认，请刷新资料库后检查并重试：${errorMessage(error)}`)
+    }
+
+    return this.cleanupResult(ownerId, '封面已更新')
   }
 
   async deleteImages(imageIds: string[]): Promise<MutationResult> {

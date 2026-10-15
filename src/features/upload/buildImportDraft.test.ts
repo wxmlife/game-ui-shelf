@@ -52,7 +52,7 @@ describe('buildImportDraft', () => {
     expect(draft.files[0]).toMatchObject({
       moduleKey: '公会',
       moduleName: '公会',
-      flowName: '兑换商店界面',
+      flowName: '',
       title: '兑换商店界面',
       sequenceOrder: 2,
       tags: ['公会', '兑换', '商店'],

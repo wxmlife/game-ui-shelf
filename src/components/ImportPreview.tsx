@@ -53,7 +53,7 @@ export function ImportPreview({ draft, onMetaChange, onFileChange, onRemove }: I
         <div>
           <p className="eyebrow">CHECK BEFORE UPLOAD</p>
           <h2 id="import-preview-title">导入预览</h2>
-          <p>系统已按文件名识别模块与动作；上传前都可以修改。</p>
+          <p>系统已按文件名识别模块、图片标题与关键词标签；上传前都可以修改。</p>
         </div>
         <div className="import-counts">
           <span><CheckCircle2 size={14} /> {draft.readyFiles.length} 张可上传</span>

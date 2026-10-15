@@ -158,7 +158,7 @@ export function LibraryPage() {
         </div>
       </div>
 
-      {managementMode && <p className="game-management-note">管理模式：点击游戏卡片左上角的删除按钮；删除前仍需输入完整游戏名称确认。</p>}
+      {managementMode && <p className="game-management-note">管理模式：点击游戏卡片左上角的删除按钮；确认后将永久删除游戏及其中所有图片。</p>}
 
       {games.length ? (
         <section className="game-grid" aria-label="游戏列表">
@@ -168,7 +168,7 @@ export function LibraryPage() {
         <EmptyState compact title="没有符合条件的游戏" description="清除筛选条件后再看看。" />
       )}
 
-      {deletingGame && <DeleteConfirmDialog count={deletingImageCount} gameName={deletingGame.name} busy={busy} error={mutationError}
+      {deletingGame && <DeleteConfirmDialog count={deletingImageCount} target={{ kind: 'game', name: deletingGame.name }} busy={busy} error={mutationError}
         onClose={() => { if (!busy) { setDeletingGameId(null); setMutationError(null) } }} onConfirm={() => void confirmGameDeletion()} />}
     </main>
   )

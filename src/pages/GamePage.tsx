@@ -1,5 +1,5 @@
 import { ArrowLeft, CalendarDays, Gamepad2, Image as ImageIcon, Pencil, Upload } from 'lucide-react'
-import { type CSSProperties, useEffect, useMemo, useRef, useState } from 'react'
+import { type CSSProperties, type DragEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 
 import { useLibrary } from '../app/LibraryContext'
@@ -12,17 +12,38 @@ import { MoveImageDialog } from '../components/MoveImageDialog'
 import type { MutationResult } from '../data/libraryRepository'
 import type { GameModule, UiImage } from '../domain/models'
 
-function groupByFlow(images: UiImage[]): Array<[string, UiImage[]]> {
-  const groups = new Map<string, UiImage[]>()
-  for (const image of images) {
-    const key = image.flowId || ''
-    groups.set(key, [...(groups.get(key) ?? []), image])
-  }
-  return [...groups.entries()]
-}
+const UI_IMAGE_DRAG_TYPE = 'application/x-ui-image'
 
 function compareImages(a: UiImage, b: UiImage) {
   return a.sequenceOrder - b.sequenceOrder || a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id)
+}
+
+interface DisplayGroup {
+  key: string
+  flowName?: string
+  images: UiImage[]
+}
+
+function groupForDisplay(images: UiImage[]): DisplayGroup[] {
+  const sorted = [...images].sort(compareImages)
+  const flowCounts = new Map<string, number>()
+  for (const image of sorted) {
+    if (image.flowId) flowCounts.set(image.flowId, (flowCounts.get(image.flowId) ?? 0) + 1)
+  }
+
+  const groups = new Map<string, DisplayGroup>()
+  for (const image of sorted) {
+    const isSequence = Boolean(image.flowId && (flowCounts.get(image.flowId) ?? 0) > 1)
+    const key = isSequence ? `flow:${image.flowId}` : 'module-grid'
+    const group = groups.get(key) ?? {
+      key,
+      flowName: isSequence ? image.flowName : undefined,
+      images: [],
+    }
+    group.images.push(image)
+    groups.set(key, group)
+  }
+  return [...groups.values()]
 }
 
 function mutationWarning(result: MutationResult) {
@@ -55,6 +76,7 @@ function GameDetails({ gameId }: { gameId: string | undefined }) {
   const editable = repository.mode === 'cloud'
   const canMove = editable && Boolean(repository.moveImage)
   const canDeleteImages = editable && Boolean(repository.deleteImages)
+  const canSetCover = editable && Boolean(repository.setGameCoverFromImage)
 
   const game = snapshot?.games.find((item) => item.id === gameId)
   const modules = useMemo(
@@ -101,6 +123,27 @@ function GameDetails({ gameId }: { gameId: string | undefined }) {
     if (!canMove || !repository.moveImage || busyRef.current || image.gameId !== gameId || !modules.some((module) => module.id === targetModuleId)) return
     if (image.moduleId === targetModuleId) { setMovingImage(null); return }
     await mutate(() => repository.moveImage!(image.id, targetModuleId), () => setMovingImage(null))
+  }
+
+  function handleModuleDragOver(event: DragEvent<HTMLElement>, moduleId: string) {
+    const hasTransferImage = Array.from(event.dataTransfer.types ?? []).includes(UI_IMAGE_DRAG_TYPE)
+    if (!canMove || busyRef.current || (!hasTransferImage && !draggingId)) return
+    event.preventDefault()
+    event.dataTransfer.dropEffect = 'move'
+    setDropTarget(moduleId)
+  }
+
+  function handleModuleDragLeave(event: DragEvent<HTMLElement>) {
+    if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropTarget(null)
+  }
+
+  function handleModuleDrop(event: DragEvent<HTMLElement>, moduleId: string) {
+    event.preventDefault()
+    const transferId = event.dataTransfer.getData(UI_IMAGE_DRAG_TYPE)
+    const image = gameImages.find((item) => item.id === (transferId || draggingId))
+    setDropTarget(null)
+    setDraggingId(null)
+    if (image && canMove && !busyRef.current) void moveImage(image, moduleId)
   }
 
   function requestDeletion(ids: string[]) {
@@ -163,7 +206,20 @@ function GameDetails({ gameId }: { gameId: string | undefined }) {
 
       <nav className="module-jump" aria-label="模块目录">
         <span>模块</span>
-        {modules.map((module) => <a href={`#/game/${game.id}#module-${module.id}`} key={module.id}>{module.name}</a>)}
+        {modules.map((module) => (
+          <a
+            className={dropTarget === module.id ? 'is-drop-target' : undefined}
+            href={`#/game/${game.id}`}
+            key={module.id}
+            onClick={(event) => {
+              event.preventDefault()
+              document.getElementById(`module-${module.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+            }}
+            onDragOver={(event) => handleModuleDragOver(event, module.id)}
+            onDragLeave={handleModuleDragLeave}
+            onDrop={(event) => handleModuleDrop(event, module.id)}
+          >{module.name}</a>
+        ))}
       </nav>
 
       <div className="module-list">
@@ -174,15 +230,9 @@ function GameDetails({ gameId }: { gameId: string | undefined }) {
 
           return (
             <section className={`module-section${dropTarget === module.id ? ' is-drop-target' : ''}`} id={`module-${module.id}`} key={module.id} aria-label={module.name}
-              onDragOver={(event) => { if (canMove && draggingId && !busy) { event.preventDefault(); event.dataTransfer.dropEffect = 'move'; setDropTarget(module.id) } }}
-              onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropTarget(null) }}
-              onDrop={(event) => {
-                event.preventDefault()
-                setDropTarget(null)
-                const image = gameImages.find((item) => item.id === draggingId)
-                setDraggingId(null)
-                if (image && canMove && !busy) void moveImage(image, module.id)
-              }}>
+              onDragOver={(event) => handleModuleDragOver(event, module.id)}
+              onDragLeave={handleModuleDragLeave}
+              onDrop={(event) => handleModuleDrop(event, module.id)}>
               <header className="module-heading">
                 <div><span>{module.key}</span><h2>{module.name}</h2></div>
                 <div className="module-heading-actions">
@@ -193,16 +243,16 @@ function GameDetails({ gameId }: { gameId: string | undefined }) {
                 </div>
               </header>
               {moduleImages.length ? (
-                groupByFlow(moduleImages).map(([flowId, images]) => (
-                  <div className="flow-group" key={flowId}>
-                    {images[0].flowName && (
+                groupForDisplay(moduleImages).map((group) => (
+                  <div className="flow-group" key={group.key}>
+                    {group.flowName && (
                       <div className="flow-heading">
-                        <h3>{images[0].flowName}</h3>
-                        <span>{images.length} 步</span>
+                        <h3>{group.flowName}</h3>
+                        <span>{group.images.length} 步</span>
                       </div>
                     )}
                     <div className="image-grid">
-                      {images.map((image) => <ImageCard key={image.id} image={image} onOpen={(item) => { if (!busyRef.current) setSelectedImage(item) }} busy={busy}
+                      {group.images.map((image) => <ImageCard key={image.id} image={image} onOpen={(item) => { if (!busyRef.current) setSelectedImage(item) }} busy={busy}
                         selected={selectedIds.includes(image.id)}
                         onSelect={canDeleteImages ? (id, selected) => setSelectedIds((current) => selected ? [...new Set([...current, id])] : current.filter((item) => item !== id)) : undefined}
                         onMove={canMove ? (item) => { if (busyRef.current) return; setMutationError(null); setMovingImage(item) } : undefined}
@@ -220,13 +270,20 @@ function GameDetails({ gameId }: { gameId: string | undefined }) {
 
       {selectedImage && (
         <ImageViewer
-          images={gameImages
-            .filter((image) => image.moduleId === selectedImage.moduleId && (image.flowId || null) === (selectedImage.flowId || null))
-            .sort(compareImages)}
+          images={groupForDisplay(gameImages.filter((image) => image.moduleId === selectedImage.moduleId))
+            .find((group) => group.images.some((image) => image.id === selectedImage.id))?.images ?? [selectedImage]}
           initialImageId={selectedImage.id}
           onClose={() => { if (!busyRef.current) setSelectedImage(null) }}
           suspended={Boolean(deletion) || busy}
           onDelete={canDeleteImages ? (image) => requestDeletion([image.id]) : undefined}
+          onSetCover={canSetCover && repository.setGameCoverFromImage ? async (image) => {
+            if (!gameImages.some((item) => item.id === image.id)) throw new Error('这张图片已不在当前游戏中')
+            await mutate(
+              () => repository.setGameCoverFromImage!(game.id, image.id),
+              () => setSelectedImage(null),
+              true,
+            )
+          } : undefined}
           onSaveMetadata={editable && repository.updateImageMetadata ? async (imageId, update) => {
             if (!gameImages.some((image) => image.id === imageId)) return
             await mutate(() => repository.updateImageMetadata!(imageId, update), () => setSelectedImage(null), true)
@@ -245,7 +302,7 @@ function GameDetails({ gameId }: { gameId: string | undefined }) {
       {movingImage && <MoveImageDialog image={movingImage} modules={modules} busy={busy} error={mutationError}
         onClose={() => { if (!busy) { setMovingImage(null); setMutationError(null) } }}
         onMove={(target) => void moveImage(movingImage, target)} />}
-      {deletion && <DeleteConfirmDialog count={deletion.ids.length} busy={busy} error={mutationError}
+      {deletion && <DeleteConfirmDialog count={deletion.ids.length} target={{ kind: 'images' }} busy={busy} error={mutationError}
         onClose={() => { if (!busy) { setDeletion(null); setMutationError(null) } }} onConfirm={() => void confirmDeletion()} />}
     </main>
   )
