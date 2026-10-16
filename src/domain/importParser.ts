@@ -119,6 +119,9 @@ export function parseImportFile(input: ImportFileInput): ParsedImportFile {
     sequenceOrder: orderMatch
       ? Number.parseInt(orderMatch[1], 10)
       : (underscoreOrder ?? ((input.sourceIndex ?? 0) + 1)),
+    explicitSequenceOrder: orderMatch
+      ? Number.parseInt(orderMatch[1], 10)
+      : underscoreOrder,
     originalFilename,
     relativePath: input.relativePath,
     extension,

@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 
 import type { Game, GameModule, LibrarySnapshot, UiImage } from '../domain/models'
+import { fileFingerprint } from '../domain/fileFingerprint'
 import type {
   ImportSubmission,
   ImportSubmissionFile,
@@ -18,9 +19,12 @@ const THUMBNAILS_BUCKET = 'game-ui-thumbnails'
 const SIGNED_URL_SECONDS = 24 * 60 * 60
 const CLEANUP_PAGE_SIZE = 500
 const STORAGE_REMOVE_CHUNK_SIZE = 100
+const FINGERPRINT_QUERY_CHUNK_SIZE = 10
 
 type Row = Record<string, unknown>
 interface CleanupRow { id: number; bucket: string; path: string }
+
+class UnconfirmedUploadError extends Error {}
 
 function text(value: unknown, fallback = ''): string {
   return typeof value === 'string' ? value : fallback
@@ -345,7 +349,7 @@ export class SupabaseLibraryRepository implements LibraryRepository {
         storedThumbnailPath = thumbnailPath
       }
 
-      const { error: metadataError } = await this.client.rpc('create_ui_image_with_tags', {
+      const metadataParameters = {
         p_game_id: gameId,
         p_capture_set_id: captureSetId,
         p_module_id: moduleId,
@@ -359,26 +363,99 @@ export class SupabaseLibraryRepository implements LibraryRepository {
         p_height: item.height ?? 0,
         p_file_size_bytes: item.file.size,
         p_sequence_order: item.sequenceOrder,
-        p_fingerprint: `${item.file.size}:${item.file.lastModified}:${item.originalFilename.toLocaleLowerCase()}`,
+        p_fingerprint: fileFingerprint(item.file, item.originalFilename),
         p_search_text: [item.title, item.moduleKey, item.moduleName, item.flowName, ...item.tags].filter(Boolean).join(' '),
         p_tags: [...new Set(item.tags.map((tag) => tag.trim()).filter(Boolean))],
-      })
-      if (metadataError) throw metadataError
+      }
+      let unconfirmedError: unknown
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        try {
+          const { error: metadataError } = await this.client.rpc('create_ui_image_with_tags', metadataParameters)
+          if (!metadataError) return
+          if (isConfirmedRpcRejection(metadataError)) {
+            if (unconfirmedError) break
+            throw metadataError
+          }
+          unconfirmedError = metadataError
+        } catch (error) {
+          if (isConfirmedRpcRejection(error)) {
+            if (unconfirmedError) break
+            throw error
+          }
+          unconfirmedError = error
+        }
+      }
+      throw new UnconfirmedUploadError(
+        `上传结果未确认，请刷新资料库后检查并重试：${errorMessage(unconfirmedError)}`,
+      )
     } catch (error) {
+      // A lost RPC response may mean the row already references these paths.
+      // The idempotent retry above is safe; if it also cannot confirm the
+      // outcome, preserve the files rather than turning a success into broken data.
+      if (error instanceof UnconfirmedUploadError) throw error
       await Promise.allSettled(uploaded.map(({ bucket, path }) => this.client.storage.from(bucket).remove([path])))
       throw error
     }
   }
 
+  private async existingFingerprints(
+    userId: string,
+    gameId: string,
+    fingerprints: readonly string[],
+  ): Promise<Set<string>> {
+    const existing = new Set<string>()
+    const uniqueFingerprints = [...new Set(fingerprints)]
+    for (let start = 0; start < uniqueFingerprints.length; start += FINGERPRINT_QUERY_CHUNK_SIZE) {
+      const chunk = uniqueFingerprints.slice(start, start + FINGERPRINT_QUERY_CHUNK_SIZE)
+      const { data, error } = await this.client
+        .from('ui_images')
+        .select('fingerprint')
+        .eq('owner_id', userId)
+        .eq('game_id', gameId)
+        .in('fingerprint', chunk)
+      if (error) throw error
+      for (const row of (data ?? []) as Array<{ fingerprint?: unknown }>) {
+        if (typeof row.fingerprint === 'string') existing.add(row.fingerprint)
+      }
+    }
+    return existing
+  }
+
   async submitImport(draft: ImportSubmission): Promise<UploadBatchResult> {
     const userId = await this.userId()
-    const gameId = await this.rowId('games', 'upsert', {
+    const gamePayload: Row = {
       owner_id: userId,
       slug: slugify(draft.gameName),
       name: draft.gameName,
-      platforms: draft.platform ? [draft.platform] : [],
       updated_at: new Date().toISOString(),
-    }, { onConflict: 'owner_id,slug' })
+    }
+    if (draft.platform) gamePayload.platforms = [draft.platform]
+    const gameId = await this.rowId('games', 'upsert', gamePayload, { onConflict: 'owner_id,slug' })
+
+    const fingerprints = draft.files.map((item) => fileFingerprint(item.file, item.originalFilename))
+    const existing = await this.existingFingerprints(userId, gameId, fingerprints)
+    const pendingFiles: ImportSubmissionFile[] = []
+    const queuedFingerprints = new Set<string>()
+    let skipped = 0
+    for (let index = 0; index < draft.files.length; index += 1) {
+      const fingerprint = fingerprints[index]
+      if (existing.has(fingerprint) || queuedFingerprints.has(fingerprint)) {
+        skipped += 1
+      } else {
+        queuedFingerprints.add(fingerprint)
+        pendingFiles.push(draft.files[index])
+      }
+    }
+    if (!pendingFiles.length) {
+      return {
+        status: 'complete',
+        uploaded: 0,
+        skipped,
+        failures: [],
+        message: `这 ${skipped} 张图片已在当前游戏中，已跳过重复项`,
+      }
+    }
+
     const captureSetId = await this.rowId('capture_sets', 'insert', {
       owner_id: userId,
       game_id: gameId,
@@ -390,7 +467,7 @@ export class SupabaseLibraryRepository implements LibraryRepository {
     const failures: UploadBatchResult['failures'] = []
     let uploaded = 0
 
-    for (const item of draft.files) {
+    for (const item of pendingFiles) {
       try {
         let moduleId = moduleIds.get(item.moduleKey)
         if (!moduleId) {
@@ -429,8 +506,13 @@ export class SupabaseLibraryRepository implements LibraryRepository {
     return {
       status: failures.length ? 'partial' : 'complete',
       uploaded,
+      skipped,
       failures,
-      message: failures.length ? '部分图片上传失败，可保留成功项并重试失败文件' : undefined,
+      message: failures.length
+        ? `部分图片上传失败${skipped ? `，另有 ${skipped} 张重复图片已跳过` : ''}，可保留成功项并重试失败文件`
+        : skipped
+          ? `已上传 ${uploaded} 张图片，另有 ${skipped} 张已存在并跳过`
+          : undefined,
     }
   }
 

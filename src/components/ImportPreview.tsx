@@ -24,12 +24,13 @@ function LocalPreview({ file }: LocalPreviewProps) {
 
 interface ImportPreviewProps {
   draft: UploadDraft
+  disabled?: boolean
   onMetaChange: (patch: Partial<Pick<UploadDraft, 'gameName' | 'platform' | 'version'>>) => void
   onFileChange: (fileId: string, patch: Partial<UploadDraftFile>) => void
   onRemove: (fileId: string) => void
 }
 
-function TagEditor({ item, onChange }: { item: UploadDraftFile; onChange: (tags: string[]) => void }) {
+function TagEditor({ item, disabled, onChange }: { item: UploadDraftFile; disabled?: boolean; onChange: (tags: string[]) => void }) {
   const [value, setValue] = useState(item.tags.join(', '))
 
   return (
@@ -37,6 +38,7 @@ function TagEditor({ item, onChange }: { item: UploadDraftFile; onChange: (tags:
       aria-label={`标签 ${item.originalFilename}`}
       placeholder="弹窗, 奖励, 动效"
       value={value}
+      disabled={disabled}
       onChange={(event) => {
         const nextValue = event.target.value
         setValue(nextValue)
@@ -46,7 +48,7 @@ function TagEditor({ item, onChange }: { item: UploadDraftFile; onChange: (tags:
   )
 }
 
-export function ImportPreview({ draft, onMetaChange, onFileChange, onRemove }: ImportPreviewProps) {
+export function ImportPreview({ draft, disabled = false, onMetaChange, onFileChange, onRemove }: ImportPreviewProps) {
   return (
     <section className="import-preview" aria-labelledby="import-preview-title">
       <header className="import-preview-heading">
@@ -64,15 +66,15 @@ export function ImportPreview({ draft, onMetaChange, onFileChange, onRemove }: I
       <div className="import-meta-grid">
         <label>
           <span>游戏名称</span>
-          <input value={draft.gameName} onChange={(event) => onMetaChange({ gameName: event.target.value })} />
+          <input disabled={disabled} value={draft.gameName} onChange={(event) => onMetaChange({ gameName: event.target.value })} />
         </label>
         <label>
           <span>平台</span>
-          <input placeholder="例如 iOS / PC" value={draft.platform} onChange={(event) => onMetaChange({ platform: event.target.value })} />
+          <input disabled={disabled} placeholder="例如 iOS / PC" value={draft.platform} onChange={(event) => onMetaChange({ platform: event.target.value })} />
         </label>
         <label>
           <span>版本</span>
-          <input placeholder="例如 1.8.0" value={draft.version} onChange={(event) => onMetaChange({ version: event.target.value })} />
+          <input disabled={disabled} placeholder="例如 1.8.0" value={draft.version} onChange={(event) => onMetaChange({ version: event.target.value })} />
         </label>
       </div>
 
@@ -85,31 +87,31 @@ export function ImportPreview({ draft, onMetaChange, onFileChange, onRemove }: I
               <div className="import-field-grid">
                 <label>
                   <span>图片标题</span>
-                  <input aria-label={`图片标题 ${item.originalFilename}`} value={item.title} onChange={(event) => onFileChange(item.id, { title: event.target.value })} />
+                  <input disabled={disabled} aria-label={`图片标题 ${item.originalFilename}`} value={item.title} onChange={(event) => onFileChange(item.id, { title: event.target.value })} />
                 </label>
                 <label>
                   <span>模块标识</span>
-                  <input aria-label={`模块标识 ${item.originalFilename}`} value={item.moduleKey} onChange={(event) => onFileChange(item.id, { moduleKey: event.target.value })} />
+                  <input disabled={disabled} aria-label={`模块标识 ${item.originalFilename}`} value={item.moduleKey} onChange={(event) => onFileChange(item.id, { moduleKey: event.target.value })} />
                 </label>
                 <label>
                   <span>模块名称</span>
-                  <input aria-label={`模块名称 ${item.originalFilename}`} value={item.moduleName} onChange={(event) => onFileChange(item.id, { moduleName: event.target.value })} />
+                  <input disabled={disabled} aria-label={`模块名称 ${item.originalFilename}`} value={item.moduleName} onChange={(event) => onFileChange(item.id, { moduleName: event.target.value })} />
                 </label>
                 <label>
                   <span>流程名称</span>
-                  <input aria-label={`流程名称 ${item.originalFilename}`} placeholder="可选" value={item.flowName} onChange={(event) => onFileChange(item.id, { flowName: event.target.value })} />
+                  <input disabled={disabled} aria-label={`流程名称 ${item.originalFilename}`} placeholder="可选" value={item.flowName} onChange={(event) => onFileChange(item.id, { flowName: event.target.value })} />
                 </label>
                 <label className="import-tags-field">
                   <span>标签（逗号分隔）</span>
-                  <TagEditor item={item} onChange={(tags) => onFileChange(item.id, { tags })} />
+                  <TagEditor item={item} disabled={disabled} onChange={(tags) => onFileChange(item.id, { tags })} />
                 </label>
                 <label className="import-order-field">
                   <span>顺序</span>
-                  <input aria-label={`顺序 ${item.originalFilename}`} type="number" min="0" value={item.sequenceOrder} onChange={(event) => onFileChange(item.id, { sequenceOrder: Number(event.target.value) })} />
+                  <input disabled={disabled} aria-label={`顺序 ${item.originalFilename}`} type="number" min="0" value={item.sequenceOrder} onChange={(event) => onFileChange(item.id, { sequenceOrder: Number(event.target.value) })} />
                 </label>
               </div>
             </div>
-            <button className="icon-button" type="button" aria-label={`移除 ${item.originalFilename}`} onClick={() => onRemove(item.id)}><Trash2 size={16} /></button>
+            <button className="icon-button" type="button" disabled={disabled} aria-label={`移除 ${item.originalFilename}`} onClick={() => onRemove(item.id)}><Trash2 size={16} /></button>
           </article>
         ))}
       </div>
@@ -121,7 +123,7 @@ export function ImportPreview({ draft, onMetaChange, onFileChange, onRemove }: I
             <div key={item.id}>
               <span>{item.originalFilename}</span>
               <strong>{item.issues.map((issue) => issue.message).join('；')}</strong>
-              <button type="button" onClick={() => onRemove(item.id)}>移除</button>
+              <button type="button" disabled={disabled} onClick={() => onRemove(item.id)}>移除</button>
             </div>
           ))}
         </div>

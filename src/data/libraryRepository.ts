@@ -32,6 +32,7 @@ export interface UploadFailure {
 export interface UploadBatchResult {
   status: 'complete' | 'partial' | 'unavailable'
   uploaded: number
+  skipped?: number
   failures: UploadFailure[]
   message?: string
 }

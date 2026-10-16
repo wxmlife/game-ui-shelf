@@ -50,17 +50,20 @@ export function UploadPage() {
   const [result, setResult] = useState<UploadBatchResult | null>(null)
 
   function selectFiles(files: File[]) {
+    if (submitting) return
     setDraft(buildImportDraft(files))
     setResult(null)
   }
 
   function changeFile(fileId: string, patch: Partial<UploadDraftFile>) {
+    if (submitting) return
     setDraft((current) => current
       ? updateFiles(current, current.files.map((file) => file.id === fileId ? { ...file, ...patch } : file))
       : current)
   }
 
   function removeFile(fileId: string) {
+    if (submitting) return
     setDraft((current) => current
       ? updateFiles(current, current.files.filter((file) => file.id !== fileId))
       : current)
@@ -68,6 +71,7 @@ export function UploadPage() {
 
   async function submit() {
     if (!draft?.readyFiles.length || submitting) return
+    const submittedDraft = draft
     setSubmitting(true)
     setResult(null)
     try {
@@ -101,10 +105,18 @@ export function UploadPage() {
         files,
       })
       setResult(nextResult)
-      if (nextResult.status === 'partial') {
+      if (nextResult.status === 'complete') {
+        setDraft((current) => current === submittedDraft
+          ? submittedDraft.rejectedFiles.length
+            ? updateFiles(submittedDraft, submittedDraft.rejectedFiles)
+            : null
+          : current)
+      } else if (nextResult.status === 'partial') {
         const failedIds = new Set(nextResult.failures.map((failure) => failure.fileId))
         setDraft((current) => current
-          ? updateFiles(current, current.files.filter((file) => failedIds.has(file.id)))
+          ? current === submittedDraft
+            ? updateFiles(current, current.files.filter((file) => file.status === 'rejected' || failedIds.has(file.id)))
+            : current
           : current)
       }
       if (nextResult.status === 'complete' || nextResult.status === 'partial') {
@@ -151,13 +163,16 @@ export function UploadPage() {
         <strong>公会模块 · 抽奖未领取奖励 · 顺序 2</strong>
       </div>
 
-      <UploadDropzone onSelect={selectFiles} />
+      <UploadDropzone onSelect={selectFiles} disabled={submitting} />
 
       {draft && (
         <>
           <ImportPreview
             draft={draft}
-            onMetaChange={(patch) => setDraft((current) => current ? { ...current, ...patch } : current)}
+            disabled={submitting}
+            onMetaChange={(patch) => {
+              if (!submitting) setDraft((current) => current ? { ...current, ...patch } : current)
+            }}
             onFileChange={changeFile}
             onRemove={removeFile}
           />
@@ -179,7 +194,7 @@ export function UploadPage() {
         <div className={`upload-result upload-result--${result.status}`} role="status">
           {result.status === 'complete' ? <CheckCircle2 size={18} /> : <AlertCircle size={18} />}
           <div>
-            <strong>{result.status === 'complete' ? `已完成上传 ${result.uploaded} 张图片` : result.message}</strong>
+            <strong>{result.status === 'complete' ? result.message ?? `已完成上传 ${result.uploaded} 张图片` : result.message}</strong>
             {result.status === 'partial' && result.uploaded > 0 && <span>已成功 {result.uploaded} 张，其余文件可稍后重试。</span>}
             {result.status === 'partial' && result.failures.length > 0 && (
               <ul aria-label="上传失败文件">

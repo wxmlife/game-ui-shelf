@@ -32,7 +32,7 @@ describe('buildImportDraft', () => {
     })
   })
 
-  it('keeps stable source order unless filenames include numeric prefixes', () => {
+  it('numbers implicit files within each module while preserving explicit filename order', () => {
     const draft = buildImportDraft([
       folderFile('IDOL/03-reward奖励-领取.png'),
       folderFile('IDOL/home首页.png'),
@@ -41,9 +41,45 @@ describe('buildImportDraft', () => {
 
     expect(draft.files.map((file) => [file.originalFilename, file.sequenceOrder])).toEqual([
       ['03-reward奖励-领取.png', 3],
-      ['home首页.png', 2],
+      ['home首页.png', 1],
       ['01-reward奖励-入口.png', 1],
     ])
+  })
+
+  it('restarts implicit sequence order for every module in an interleaved folder selection', () => {
+    const draft = buildImportDraft([
+      folderFile('IDOL/公会_总部已解锁.jpg'),
+      folderFile('IDOL/活动_心动21游戏界面.jpg'),
+      folderFile('IDOL/公会_每日排名.jpg'),
+      folderFile('IDOL/活动_累计奖励.jpg'),
+    ])
+
+    expect(draft.files.map((file) => [file.moduleKey, file.sequenceOrder])).toEqual([
+      ['公会', 1],
+      ['活动', 1],
+      ['公会', 2],
+      ['活动', 2],
+    ])
+  })
+
+  it('does not let a rejected file consume the next module-local sequence number', () => {
+    const draft = buildImportDraft([
+      folderFile('IDOL/公会_说明.txt', { type: 'text/plain' }),
+      folderFile('IDOL/公会_总部已解锁.jpg'),
+    ])
+
+    expect(draft.readyFiles).toHaveLength(1)
+    expect(draft.readyFiles[0].sequenceOrder).toBe(1)
+  })
+
+  it('keeps implicit module order unique when explicit numbers are mixed in', () => {
+    const draft = buildImportDraft([
+      folderFile('IDOL/03-reward奖励-领取.png'),
+      folderFile('IDOL/reward奖励-未领取.png'),
+      folderFile('IDOL/reward奖励-入口.png'),
+    ])
+
+    expect(draft.files.map((file) => file.sequenceOrder)).toEqual([3, 1, 2])
   })
 
   it('populates editable draft fields from an underscore filename', () => {
@@ -85,5 +121,15 @@ describe('buildImportDraft', () => {
     expect(draft.readyFiles).toHaveLength(1)
     expect(draft.rejectedFiles).toHaveLength(1)
     expect(draft.rejectedFiles[0].issues[0]?.code).toBe('duplicate')
+  })
+
+  it('keeps same-named files in different nested folders as separate images', () => {
+    const first = folderFile('IDOL/a/home首页.png', { modified: 999 })
+    const second = folderFile('IDOL/b/home首页.png', { modified: 999 })
+    const draft = buildImportDraft([first, second])
+
+    expect(buildFileFingerprint(first)).not.toBe(buildFileFingerprint(second))
+    expect(draft.readyFiles).toHaveLength(2)
+    expect(draft.rejectedFiles).toHaveLength(0)
   })
 })

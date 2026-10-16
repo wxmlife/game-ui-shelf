@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { App } from '../app/App'
 import type { LibraryRepository } from '../data/libraryRepository'
+import { MAX_UPLOAD_BYTES } from '../features/upload/buildImportDraft'
 import { createThumbnail } from '../features/upload/createThumbnail'
 import type { ThumbnailBlob } from '../features/upload/createThumbnail'
 
@@ -64,6 +65,79 @@ describe('UploadPage', () => {
     expect(await screen.findByText('已完成上传 1 张图片')).toBeInTheDocument()
   })
 
+  it('clears a completed batch so the same files cannot be submitted twice', async () => {
+    const user = userEvent.setup()
+    const submitImport = vi.fn().mockResolvedValue({ status: 'complete', uploaded: 1, failures: [] })
+    const repository: LibraryRepository = {
+      mode: 'cloud',
+      getSnapshot: vi.fn().mockResolvedValue({ games: [], captureSets: [], modules: [], images: [] }),
+      submitImport,
+    }
+    render(<App repository={repository} />)
+
+    await user.upload(
+      await screen.findByLabelText('选择游戏图片文件夹'),
+      folderFile('IDOL/home首页.png'),
+    )
+    await user.click(await screen.findByRole('button', { name: '上传 1 张图片' }))
+
+    expect(await screen.findByText('已完成上传 1 张图片')).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: '导入预览' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '上传 1 张图片' })).not.toBeInTheDocument()
+    expect(submitImport).toHaveBeenCalledTimes(1)
+  })
+
+  it('explains when every selected image already exists', async () => {
+    const user = userEvent.setup()
+    const submitImport = vi.fn().mockResolvedValue({
+      status: 'complete',
+      uploaded: 0,
+      skipped: 1,
+      failures: [],
+      message: '这 1 张图片已在当前游戏中，已跳过重复项',
+    })
+    const repository: LibraryRepository = {
+      mode: 'cloud',
+      getSnapshot: vi.fn().mockResolvedValue({ games: [], captureSets: [], modules: [], images: [] }),
+      submitImport,
+    }
+    render(<App repository={repository} />)
+
+    await user.upload(
+      await screen.findByLabelText('选择游戏图片文件夹'),
+      folderFile('IDOL/home首页.png'),
+    )
+    await user.click(await screen.findByRole('button', { name: '上传 1 张图片' }))
+
+    expect(await screen.findByText('这 1 张图片已在当前游戏中，已跳过重复项')).toBeInTheDocument()
+    expect(screen.queryByText('已完成上传 0 张图片')).not.toBeInTheDocument()
+  })
+
+  it('keeps rejected files visible after every ready file uploads successfully', async () => {
+    const user = userEvent.setup()
+    const submitImport = vi.fn().mockResolvedValue({ status: 'complete', uploaded: 1, failures: [] })
+    const repository: LibraryRepository = {
+      mode: 'cloud',
+      getSnapshot: vi.fn().mockResolvedValue({ games: [], captureSets: [], modules: [], images: [] }),
+      submitImport,
+    }
+    const tooLarge = folderFile('IDOL/reward奖励.png')
+    Object.defineProperty(tooLarge, 'size', { value: MAX_UPLOAD_BYTES + 1 })
+    render(<App repository={repository} />)
+
+    await user.upload(
+      await screen.findByLabelText('选择游戏图片文件夹'),
+      [folderFile('IDOL/home首页.png'), tooLarge],
+    )
+    await user.click(await screen.findByRole('button', { name: '上传 1 张图片' }))
+
+    expect(await screen.findByText('已完成上传 1 张图片')).toBeInTheDocument()
+    expect(screen.queryByLabelText('图片标题 home首页.png')).not.toBeInTheDocument()
+    expect(screen.getByText('reward奖励.png')).toBeInTheDocument()
+    expect(screen.getByText(/单张图片不能超过 25 MB/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '上传 0 张图片' })).toBeDisabled()
+  })
+
   it('previews files in demo mode and explains why saving is unavailable', async () => {
     const user = userEvent.setup()
     render(<App />)
@@ -104,6 +178,8 @@ describe('UploadPage', () => {
       submitImport,
     }
     render(<App repository={repository} />)
+    const tooLarge = folderFile('IDOL/shop商店.png')
+    Object.defineProperty(tooLarge, 'size', { value: MAX_UPLOAD_BYTES + 1 })
 
     await user.upload(
       await screen.findByLabelText('选择游戏图片文件夹'),
@@ -111,6 +187,7 @@ describe('UploadPage', () => {
         folderFile('IDOL/home首页.png'),
         folderFile('IDOL/task任务.png'),
         folderFile('IDOL/reward奖励.png'),
+        tooLarge,
       ],
     )
     await user.click(await screen.findByRole('button', { name: '上传 3 张图片' }))
@@ -123,6 +200,8 @@ describe('UploadPage', () => {
     expect(screen.queryByLabelText('图片标题 home首页.png')).not.toBeInTheDocument()
     expect(screen.getByLabelText('图片标题 task任务.png')).toBeInTheDocument()
     expect(screen.getByLabelText('图片标题 reward奖励.png')).toBeInTheDocument()
+    expect(screen.getByText('shop商店.png')).toBeInTheDocument()
+    expect(screen.getByText(/单张图片不能超过 25 MB/)).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: '上传 2 张图片' }))
     await waitFor(() => expect(submitImport).toHaveBeenCalledTimes(2))
@@ -130,6 +209,7 @@ describe('UploadPage', () => {
       'task任务.png',
       'reward奖励.png',
     ])
+    expect(screen.getByText('shop商店.png')).toBeInTheDocument()
   })
 
   it('keeps a successful upload result and reports when the following snapshot refresh fails', async () => {
@@ -154,7 +234,7 @@ describe('UploadPage', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('资料库刷新失败，当前内容可能不是最新：云端快照刷新失败')
   })
 
-  it('generates at most three thumbnails concurrently', async () => {
+  it('generates at most three thumbnails concurrently and freezes the submitted batch', async () => {
     const user = userEvent.setup()
     const pending: Array<(thumbnail: ThumbnailBlob) => void> = []
     vi.mocked(createThumbnail).mockImplementation(() => new Promise((resolve) => pending.push(resolve)))
@@ -179,6 +259,9 @@ describe('UploadPage', () => {
 
     await waitFor(() => expect(createThumbnail).toHaveBeenCalled())
     expect(createThumbnail).toHaveBeenCalledTimes(3)
+    expect(screen.getByLabelText('选择游戏图片文件夹')).toBeDisabled()
+    expect(screen.getByLabelText('图片标题 home首页.png')).toBeDisabled()
+    expect(screen.getByRole('button', { name: '移除 home首页.png' })).toBeDisabled()
     pending.shift()?.(thumbnailBlob())
     await waitFor(() => expect(createThumbnail).toHaveBeenCalledTimes(4))
 

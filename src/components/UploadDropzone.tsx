@@ -3,21 +3,24 @@ import { type DragEvent, useState } from 'react'
 
 interface UploadDropzoneProps {
   onSelect: (files: File[]) => void
+  disabled?: boolean
 }
 
-export function UploadDropzone({ onSelect }: UploadDropzoneProps) {
+export function UploadDropzone({ onSelect, disabled = false }: UploadDropzoneProps) {
   const [dragging, setDragging] = useState(false)
 
   function acceptDrop(event: DragEvent<HTMLLabelElement>) {
     event.preventDefault()
     setDragging(false)
+    if (disabled) return
     onSelect(Array.from(event.dataTransfer.files))
   }
 
   return (
     <label
       className={`upload-dropzone${dragging ? ' is-dragging' : ''}`}
-      onDragEnter={(event) => { event.preventDefault(); setDragging(true) }}
+      aria-disabled={disabled}
+      onDragEnter={(event) => { event.preventDefault(); if (!disabled) setDragging(true) }}
       onDragOver={(event) => event.preventDefault()}
       onDragLeave={() => setDragging(false)}
       onDrop={acceptDrop}
@@ -27,8 +30,14 @@ export function UploadDropzone({ onSelect }: UploadDropzoneProps) {
         type="file"
         accept="image/png,image/jpeg,image/webp,image/gif,image/avif"
         multiple
+        disabled={disabled}
         {...({ webkitdirectory: '' } as Record<string, string>)}
-        onChange={(event) => onSelect(Array.from(event.target.files ?? []))}
+        onChange={(event) => {
+          const files = Array.from(event.currentTarget.files ?? [])
+          event.currentTarget.value = ''
+          if (disabled) return
+          onSelect(files)
+        }}
       />
       <span className="upload-dropzone-icon"><FolderUp size={27} /></span>
       <span className="upload-dropzone-copy">

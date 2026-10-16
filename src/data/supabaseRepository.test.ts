@@ -7,6 +7,15 @@ function session(userId = 'user-1') {
   return { data: { session: { user: { id: userId } } }, error: null }
 }
 
+function fingerprintQuery(rows: Array<{ fingerprint: string }> = []) {
+  const query = {
+    eq: vi.fn(),
+    in: vi.fn().mockResolvedValue({ data: rows, error: null }),
+  }
+  query.eq.mockReturnValue(query)
+  return { select: vi.fn(() => query) }
+}
+
 interface CleanupRow { id: number; owner_id: string; bucket: string; path: string }
 
 function mutationClient(
@@ -286,10 +295,12 @@ describe('SupabaseLibraryRepository', () => {
     }
     const client = {
       auth: { getSession: vi.fn().mockResolvedValue(session()) },
-      from: vi.fn((table: string) => ({
-        upsert: vi.fn(() => ({ select: vi.fn(() => ({ single: vi.fn().mockResolvedValue({ data: { id: tableIds[table] }, error: null }) })) })),
-        insert: vi.fn(() => ({ select: vi.fn(() => ({ single: vi.fn().mockResolvedValue({ data: { id: tableIds[table] }, error: null }) })) })),
-      })),
+      from: vi.fn((table: string) => table === 'ui_images'
+        ? fingerprintQuery()
+        : ({
+            upsert: vi.fn(() => ({ select: vi.fn(() => ({ single: vi.fn().mockResolvedValue({ data: { id: tableIds[table] }, error: null }) })) })),
+            insert: vi.fn(() => ({ select: vi.fn(() => ({ single: vi.fn().mockResolvedValue({ data: { id: tableIds[table] }, error: null }) })) })),
+          })),
       rpc,
       storage: {
         from: vi.fn((bucket: string) => ({
@@ -328,6 +339,187 @@ describe('SupabaseLibraryRepository', () => {
     }))
   })
 
+  it('skips images that already exist in the target game before uploading storage objects', async () => {
+    const file = new File(['image'], 'home首页.png', { type: 'image/png', lastModified: 123 })
+    const fingerprint = `${file.size}:${file.lastModified}:${file.name.toLocaleLowerCase()}`
+    const uploads = vi.fn().mockResolvedValue({ data: { path: 'unexpected' }, error: null })
+    const rpc = vi.fn().mockResolvedValue({ data: 'unexpected', error: null })
+    const inserts = vi.fn()
+    const duplicateQuery = {
+      eq: vi.fn(),
+      in: vi.fn().mockResolvedValue({ data: [{ fingerprint }], error: null }),
+    }
+    duplicateQuery.eq.mockReturnValue(duplicateQuery)
+    const client = {
+      auth: { getSession: vi.fn().mockResolvedValue(session()) },
+      from: vi.fn((table: string) => {
+        if (table === 'games') return {
+          upsert: vi.fn(() => ({
+            select: vi.fn(() => ({ single: vi.fn().mockResolvedValue({ data: { id: 'game-1' }, error: null }) })),
+          })),
+        }
+        if (table === 'ui_images') return { select: vi.fn(() => duplicateQuery) }
+        return {
+          insert: inserts,
+          upsert: vi.fn(() => ({
+            select: vi.fn(() => ({ single: vi.fn().mockResolvedValue({ data: { id: `${table}-1` }, error: null }) })),
+          })),
+        }
+      }),
+      rpc,
+      storage: { from: vi.fn(() => ({ upload: uploads, remove: vi.fn() })) },
+    }
+    const repository = new SupabaseLibraryRepository(client as never)
+
+    const result = await repository.submitImport({
+      gameName: 'IDOL',
+      files: [{
+        id: 'file-1', file, gameName: 'IDOL', moduleKey: 'home', moduleName: '首页',
+        title: '首页', tags: ['首页'], sequenceOrder: 1, originalFilename: file.name,
+      }],
+    })
+
+    expect(result).toMatchObject({
+      status: 'complete',
+      uploaded: 0,
+      skipped: 1,
+      failures: [],
+      message: '这 1 张图片已在当前游戏中，已跳过重复项',
+    })
+    expect(uploads).not.toHaveBeenCalled()
+    expect(rpc).not.toHaveBeenCalled()
+    expect(inserts).not.toHaveBeenCalled()
+    expect(duplicateQuery.eq).toHaveBeenNthCalledWith(1, 'owner_id', 'user-1')
+    expect(duplicateQuery.eq).toHaveBeenNthCalledWith(2, 'game_id', 'game-1')
+    expect(duplicateQuery.in).toHaveBeenCalledWith('fingerprint', [fingerprint])
+  })
+
+  it('uploads only new images when a batch also contains existing images', async () => {
+    const existingFile = new File(['existing'], 'home首页.png', { type: 'image/png', lastModified: 123 })
+    const newFile = new File(['new'], 'task任务.png', { type: 'image/png', lastModified: 456 })
+    const existingFingerprint = `${existingFile.size}:${existingFile.lastModified}:${existingFile.name.toLocaleLowerCase()}`
+    const existingQuery = fingerprintQuery([{ fingerprint: existingFingerprint }])
+    const uploads = vi.fn().mockResolvedValue({ data: { path: 'ok' }, error: null })
+    const rpc = vi.fn().mockResolvedValue({ data: 'image-2', error: null })
+    const tableIds: Record<string, string> = {
+      games: 'game-1', capture_sets: 'set-1', modules: 'module-1', flows: 'flow-1',
+    }
+    const client = {
+      auth: { getSession: vi.fn().mockResolvedValue(session()) },
+      from: vi.fn((table: string) => table === 'ui_images'
+        ? existingQuery
+        : ({
+            upsert: vi.fn(() => ({ select: vi.fn(() => ({ single: vi.fn().mockResolvedValue({ data: { id: tableIds[table] }, error: null }) })) })),
+            insert: vi.fn(() => ({ select: vi.fn(() => ({ single: vi.fn().mockResolvedValue({ data: { id: tableIds[table] }, error: null }) })) })),
+          })),
+      rpc,
+      storage: { from: vi.fn(() => ({ upload: uploads, remove: vi.fn().mockResolvedValue({ data: [], error: null }) })) },
+    }
+    const repository = new SupabaseLibraryRepository(client as never)
+    const makeSubmissionFile = (file: File, index: number) => ({
+      id: `file-${index}`,
+      file,
+      gameName: 'IDOL',
+      moduleKey: index === 1 ? 'home' : 'task',
+      moduleName: index === 1 ? '首页' : '任务',
+      title: index === 1 ? '首页' : '任务',
+      tags: [index === 1 ? '首页' : '任务'],
+      sequenceOrder: index,
+      originalFilename: file.name,
+    })
+
+    const result = await repository.submitImport({
+      gameName: 'IDOL',
+      files: [makeSubmissionFile(existingFile, 1), makeSubmissionFile(newFile, 2)],
+    })
+
+    expect(result).toMatchObject({
+      status: 'complete', uploaded: 1, skipped: 1, failures: [],
+      message: '已上传 1 张图片，另有 1 张已存在并跳过',
+    })
+    expect(uploads).toHaveBeenCalledTimes(1)
+    expect(rpc).toHaveBeenCalledTimes(1)
+    expect(rpc).toHaveBeenCalledWith('create_ui_image_with_tags', expect.objectContaining({
+      p_original_filename: 'task任务.png',
+    }))
+  })
+
+  it('retries an unconfirmed metadata response without deleting uploaded files', async () => {
+    const rpc = vi.fn()
+      .mockRejectedValueOnce(new Error('connection lost'))
+      .mockResolvedValueOnce({ data: 'image-1', error: null })
+    const remove = vi.fn().mockResolvedValue({ data: [], error: null })
+    const tableIds: Record<string, string> = {
+      games: 'game-1', capture_sets: 'set-1', modules: 'module-1',
+    }
+    const client = {
+      auth: { getSession: vi.fn().mockResolvedValue(session()) },
+      from: vi.fn((table: string) => table === 'ui_images'
+        ? fingerprintQuery()
+        : ({
+            upsert: vi.fn(() => ({ select: vi.fn(() => ({ single: vi.fn().mockResolvedValue({ data: { id: tableIds[table] }, error: null }) })) })),
+            insert: vi.fn(() => ({ select: vi.fn(() => ({ single: vi.fn().mockResolvedValue({ data: { id: tableIds[table] }, error: null }) })) })),
+          })),
+      rpc,
+      storage: { from: vi.fn(() => ({
+        upload: vi.fn().mockResolvedValue({ data: { path: 'ok' }, error: null }),
+        remove,
+      })) },
+    }
+    const file = new File(['image'], 'home首页.png', { type: 'image/png', lastModified: 123 })
+    const repository = new SupabaseLibraryRepository(client as never)
+
+    const result = await repository.submitImport({
+      gameName: 'IDOL',
+      files: [{
+        id: 'file-1', file, gameName: 'IDOL', moduleKey: 'home', moduleName: '首页',
+        title: '首页', tags: ['首页'], sequenceOrder: 1, originalFilename: file.name,
+      }],
+    })
+
+    expect(result).toMatchObject({ status: 'complete', uploaded: 1, failures: [] })
+    expect(rpc).toHaveBeenCalledTimes(2)
+    expect(rpc.mock.calls[1][1]).toEqual(rpc.mock.calls[0][1])
+    expect(remove).not.toHaveBeenCalled()
+  })
+
+  it('preserves uploaded files when metadata remains unconfirmed after retry', async () => {
+    const rpc = vi.fn().mockRejectedValue(new Error('connection lost'))
+    const remove = vi.fn().mockResolvedValue({ data: [], error: null })
+    const tableIds: Record<string, string> = {
+      games: 'game-1', capture_sets: 'set-1', modules: 'module-1',
+    }
+    const client = {
+      auth: { getSession: vi.fn().mockResolvedValue(session()) },
+      from: vi.fn((table: string) => table === 'ui_images'
+        ? fingerprintQuery()
+        : ({
+            upsert: vi.fn(() => ({ select: vi.fn(() => ({ single: vi.fn().mockResolvedValue({ data: { id: tableIds[table] }, error: null }) })) })),
+            insert: vi.fn(() => ({ select: vi.fn(() => ({ single: vi.fn().mockResolvedValue({ data: { id: tableIds[table] }, error: null }) })) })),
+          })),
+      rpc,
+      storage: { from: vi.fn(() => ({
+        upload: vi.fn().mockResolvedValue({ data: { path: 'ok' }, error: null }),
+        remove,
+      })) },
+    }
+    const file = new File(['image'], 'home首页.png', { type: 'image/png', lastModified: 123 })
+    const repository = new SupabaseLibraryRepository(client as never)
+
+    const result = await repository.submitImport({
+      gameName: 'IDOL',
+      files: [{
+        id: 'file-1', file, gameName: 'IDOL', moduleKey: 'home', moduleName: '首页',
+        title: '首页', tags: ['首页'], sequenceOrder: 1, originalFilename: file.name,
+      }],
+    })
+
+    expect(result).toMatchObject({ status: 'partial', uploaded: 0 })
+    expect(result.failures[0]?.message).toContain('上传结果未确认')
+    expect(rpc).toHaveBeenCalledTimes(2)
+    expect(remove).not.toHaveBeenCalled()
+  })
+
   it('uses an ASCII storage key while preserving a Chinese original filename', async () => {
     const uploadedPaths: string[] = []
     const rpc = vi.fn().mockResolvedValue({ data: 'image-1', error: null })
@@ -336,10 +528,12 @@ describe('SupabaseLibraryRepository', () => {
     }
     const client = {
       auth: { getSession: vi.fn().mockResolvedValue(session()) },
-      from: vi.fn((table: string) => ({
-        upsert: vi.fn(() => ({ select: vi.fn(() => ({ single: vi.fn().mockResolvedValue({ data: { id: tableIds[table] }, error: null }) })) })),
-        insert: vi.fn(() => ({ select: vi.fn(() => ({ single: vi.fn().mockResolvedValue({ data: { id: tableIds[table] }, error: null }) })) })),
-      })),
+      from: vi.fn((table: string) => table === 'ui_images'
+        ? fingerprintQuery()
+        : ({
+            upsert: vi.fn(() => ({ select: vi.fn(() => ({ single: vi.fn().mockResolvedValue({ data: { id: tableIds[table] }, error: null }) })) })),
+            insert: vi.fn(() => ({ select: vi.fn(() => ({ single: vi.fn().mockResolvedValue({ data: { id: tableIds[table] }, error: null }) })) })),
+          })),
       rpc,
       storage: {
         from: vi.fn(() => ({

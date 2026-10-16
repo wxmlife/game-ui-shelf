@@ -111,6 +111,7 @@ export interface ParsedImportFile {
   title: string
   steps: string[]
   sequenceOrder: number
+  explicitSequenceOrder?: number
   originalFilename: string
   relativePath: string
   extension: string
