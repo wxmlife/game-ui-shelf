@@ -269,6 +269,8 @@ export class SupabaseLibraryRepository implements LibraryRepository {
       aliases: strings(row.aliases),
       coverUrl: await this.signedUrl(THUMBNAILS_BUCKET, row.cover_thumbnail_path) || undefined,
       coverTone: text(row.cover_tone, '#26312c'),
+      coverFocusX: number(row.cover_focus_x, 50),
+      coverFocusY: number(row.cover_focus_y, 50),
       developer: text(row.developer) || undefined,
       platforms: strings(row.platforms),
       tags: strings(row.tags),
@@ -535,12 +537,11 @@ export class SupabaseLibraryRepository implements LibraryRepository {
   async updateImageMetadata(imageId: string, update: ImageMetadataUpdate): Promise<MutationResult> {
     await this.userId()
     const tags = [...new Set(update.tags.map((tag) => tag.trim()).filter(Boolean))]
-    const { error } = await this.client.rpc('update_ui_image_metadata_with_tags', {
+    const { error } = await this.client.rpc('update_ui_image_metadata_without_order', {
       p_image_id: imageId,
       p_module_id: update.moduleId,
       p_title: update.title.trim(),
       p_flow_name: update.flowName.trim(),
-      p_sequence_order: update.sequenceOrder,
       p_search_text: [update.title, update.flowName, ...tags].filter(Boolean).join(' '),
       p_tags: tags,
     })
@@ -559,7 +560,58 @@ export class SupabaseLibraryRepository implements LibraryRepository {
     return { status: 'complete' }
   }
 
+  async placeImage(imageId: string, targetModuleId: string, beforeImageId: string | null): Promise<MutationResult> {
+    await this.userId()
+    const { error } = await this.client.rpc('place_ui_image', {
+      p_image_id: imageId,
+      p_target_module_id: targetModuleId,
+      p_before_image_id: beforeImageId,
+    })
+    if (error) throw error
+    return { status: 'complete' }
+  }
+
+  async updateGameCoverFocus(gameId: string, x: number, y: number): Promise<MutationResult> {
+    if (![x, y].every((value) => Number.isFinite(value) && value >= 0 && value <= 100)) {
+      throw new Error('封面焦点必须在 0 到 100 之间')
+    }
+    await this.userId()
+    const { error } = await this.client.rpc('update_game_cover_focus', {
+      p_game_id: gameId,
+      p_focus_x: x,
+      p_focus_y: y,
+    })
+    if (error) throw error
+    return { status: 'complete' }
+  }
+
   async setGameCoverFromImage(gameId: string, imageId: string): Promise<MutationResult> {
+    return this.setGameCoverFromImageUsingRpc(gameId, imageId, 'set_game_cover_from_image')
+  }
+
+  async setGameCoverFromImageWithFocus(
+    gameId: string,
+    imageId: string,
+    x: number,
+    y: number,
+  ): Promise<MutationResult> {
+    if (![x, y].every((value) => Number.isFinite(value) && value >= 0 && value <= 100)) {
+      throw new Error('封面焦点必须在 0 到 100 之间')
+    }
+    return this.setGameCoverFromImageUsingRpc(
+      gameId,
+      imageId,
+      'set_game_cover_from_image_with_focus',
+      { p_focus_x: x, p_focus_y: y },
+    )
+  }
+
+  private async setGameCoverFromImageUsingRpc(
+    gameId: string,
+    imageId: string,
+    rpcName: 'set_game_cover_from_image' | 'set_game_cover_from_image_with_focus',
+    extraRpcArguments: Record<string, number> = {},
+  ): Promise<MutationResult> {
     const ownerId = await this.userId()
     const { data: image, error: imageError } = await this.client.from('ui_images')
       .select('thumbnail_path')
@@ -591,10 +643,11 @@ export class SupabaseLibraryRepository implements LibraryRepository {
     }
 
     try {
-      const { error } = await this.client.rpc('set_game_cover_from_image', {
+      const { error } = await this.client.rpc(rpcName, {
         p_game_id: gameId,
         p_image_id: imageId,
         p_cover_thumbnail_path: coverPath,
+        ...extraRpcArguments,
       })
       if (error) throw error
     } catch (error) {

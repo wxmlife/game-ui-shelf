@@ -1,10 +1,11 @@
-import { ArrowLeft, CalendarDays, Gamepad2, Image as ImageIcon, Pencil, Upload } from 'lucide-react'
+import { ArrowLeft, CalendarDays, Gamepad2, Image as ImageIcon, ImagePlus, Pencil, Upload } from 'lucide-react'
 import { type CSSProperties, type DragEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 
 import { useLibrary } from '../app/LibraryContext'
 import { EmptyState } from '../components/EmptyState'
 import { DeleteConfirmDialog } from '../components/DeleteConfirmDialog'
+import { type CoverFocus, GameCoverEditor } from '../components/GameCoverEditor'
 import { ImageCard } from '../components/ImageCard'
 import { ImageViewer } from '../components/ImageViewer'
 import { ModuleEditor } from '../components/ModuleEditor'
@@ -16,34 +17,6 @@ const UI_IMAGE_DRAG_TYPE = 'application/x-ui-image'
 
 function compareImages(a: UiImage, b: UiImage) {
   return a.sequenceOrder - b.sequenceOrder || a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id)
-}
-
-interface DisplayGroup {
-  key: string
-  flowName?: string
-  images: UiImage[]
-}
-
-function groupForDisplay(images: UiImage[]): DisplayGroup[] {
-  const sorted = [...images].sort(compareImages)
-  const flowCounts = new Map<string, number>()
-  for (const image of sorted) {
-    if (image.flowId) flowCounts.set(image.flowId, (flowCounts.get(image.flowId) ?? 0) + 1)
-  }
-
-  const groups = new Map<string, DisplayGroup>()
-  for (const image of sorted) {
-    const isSequence = Boolean(image.flowId && (flowCounts.get(image.flowId) ?? 0) > 1)
-    const key = isSequence ? `flow:${image.flowId}` : 'module-grid'
-    const group = groups.get(key) ?? {
-      key,
-      flowName: isSequence ? image.flowName : undefined,
-      images: [],
-    }
-    group.images.push(image)
-    groups.set(key, group)
-  }
-  return [...groups.values()]
 }
 
 function mutationWarning(result: MutationResult) {
@@ -62,6 +35,7 @@ function GameDetails({ gameId }: { gameId: string | undefined }) {
   const [movingImage, setMovingImage] = useState<UiImage | null>(null)
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [deletion, setDeletion] = useState<{ gameId: string; ids: string[] } | null>(null)
+  const [editingCover, setEditingCover] = useState<{ initialImage?: UiImage } | null>(null)
   const [busy, setBusy] = useState(false)
   const busyRef = useRef(false)
   const active = useRef(true)
@@ -73,10 +47,13 @@ function GameDetails({ gameId }: { gameId: string | undefined }) {
   const [warning, setWarning] = useState<string | null>(null)
   const [draggingId, setDraggingId] = useState<string | null>(null)
   const [dropTarget, setDropTarget] = useState<string | null>(null)
+  const [cardDropTarget, setCardDropTarget] = useState<{ imageId: string; side: 'before' | 'after' } | null>(null)
   const editable = repository.mode === 'cloud'
-  const canMove = editable && Boolean(repository.moveImage)
+  const canMove = editable && Boolean(repository.placeImage)
   const canDeleteImages = editable && Boolean(repository.deleteImages)
-  const canSetCover = editable && Boolean(repository.setGameCoverFromImage)
+  const canManageCover = editable
+    && Boolean(repository.setGameCoverFromImageWithFocus)
+    && Boolean(repository.updateGameCoverFocus)
 
   const game = snapshot?.games.find((item) => item.id === gameId)
   const modules = useMemo(
@@ -100,14 +77,16 @@ function GameDetails({ gameId }: { gameId: string | undefined }) {
     try {
       const result = await action()
       if (result.status === 'unavailable') throw new Error(result.message || '当前无法执行此操作')
-      if (active.current) {
-        setWarning(mutationWarning(result))
-        onSuccess(result)
-      }
       try {
         await refresh()
       } catch {
         // LibraryProvider keeps a route-independent, non-blocking refresh warning.
+      }
+      if (active.current) {
+        setWarning(mutationWarning(result))
+        busyRef.current = false
+        setBusy(false)
+        onSuccess(result)
       }
     } catch (caught) {
       if (!active.current) return
@@ -119,10 +98,25 @@ function GameDetails({ gameId }: { gameId: string | undefined }) {
     }
   }
 
-  async function moveImage(image: UiImage, targetModuleId: string) {
-    if (!canMove || !repository.moveImage || busyRef.current || image.gameId !== gameId || !modules.some((module) => module.id === targetModuleId)) return
-    if (image.moduleId === targetModuleId) { setMovingImage(null); return }
-    await mutate(() => repository.moveImage!(image.id, targetModuleId), () => setMovingImage(null))
+  async function placeImage(image: UiImage, targetModuleId: string, beforeImageId: string | null) {
+    if (!canMove || !repository.placeImage || busyRef.current || image.gameId !== gameId || !modules.some((module) => module.id === targetModuleId)) return
+    if (beforeImageId && !gameImages.some((item) => item.id === beforeImageId && item.moduleId === targetModuleId && item.id !== image.id)) return
+    await mutate(() => repository.placeImage!(image.id, targetModuleId, beforeImageId), () => setMovingImage(null))
+  }
+
+  async function saveCover(image: UiImage | undefined, focus: CoverFocus) {
+    if (!game || !canManageCover || !repository.setGameCoverFromImageWithFocus || !repository.updateGameCoverFocus || busyRef.current) return
+    if (image && !gameImages.some((item) => item.id === image.id)) {
+      setMutationError('这张图片已不在当前游戏中')
+      return
+    }
+
+    await mutate(
+      () => image
+        ? repository.setGameCoverFromImageWithFocus!(game.id, image.id, focus.x, focus.y)
+        : repository.updateGameCoverFocus!(game.id, focus.x, focus.y),
+      () => setEditingCover(null),
+    )
   }
 
   function handleModuleDragOver(event: DragEvent<HTMLElement>, moduleId: string) {
@@ -130,6 +124,7 @@ function GameDetails({ gameId }: { gameId: string | undefined }) {
     if (!canMove || busyRef.current || (!hasTransferImage && !draggingId)) return
     event.preventDefault()
     event.dataTransfer.dropEffect = 'move'
+    setCardDropTarget(null)
     setDropTarget(moduleId)
   }
 
@@ -139,11 +134,55 @@ function GameDetails({ gameId }: { gameId: string | undefined }) {
 
   function handleModuleDrop(event: DragEvent<HTMLElement>, moduleId: string) {
     event.preventDefault()
+    event.stopPropagation()
     const transferId = event.dataTransfer.getData(UI_IMAGE_DRAG_TYPE)
     const image = gameImages.find((item) => item.id === (transferId || draggingId))
     setDropTarget(null)
+    setCardDropTarget(null)
     setDraggingId(null)
-    if (image && canMove && !busyRef.current) void moveImage(image, moduleId)
+    if (image && canMove && !busyRef.current) void placeImage(image, moduleId, null)
+  }
+
+  function cardPlacement(event: DragEvent<HTMLElement>, targetImage: UiImage, moduleImages: UiImage[]) {
+    const rect = event.currentTarget.getBoundingClientRect()
+    const side: 'before' | 'after' = event.clientX < rect.left + rect.width / 2 ? 'before' : 'after'
+    const transferId = event.dataTransfer.getData(UI_IMAGE_DRAG_TYPE)
+    const draggedId = transferId || draggingId
+    const candidates = moduleImages.filter((item) => item.id !== draggedId)
+    const targetIndex = candidates.findIndex((item) => item.id === targetImage.id)
+    if (targetIndex < 0) return null
+    return {
+      side,
+      beforeImageId: side === 'before' ? targetImage.id : candidates[targetIndex + 1]?.id ?? null,
+    }
+  }
+
+  function handleCardDragOver(event: DragEvent<HTMLElement>, targetImage: UiImage, moduleImages: UiImage[]) {
+    const hasTransferImage = Array.from(event.dataTransfer.types ?? []).includes(UI_IMAGE_DRAG_TYPE)
+    if (!canMove || busyRef.current || (!hasTransferImage && !draggingId) || draggingId === targetImage.id) return
+    const placement = cardPlacement(event, targetImage, moduleImages)
+    if (!placement) return
+    event.preventDefault()
+    event.stopPropagation()
+    event.dataTransfer.dropEffect = 'move'
+    setDropTarget(null)
+    setCardDropTarget({ imageId: targetImage.id, side: placement.side })
+  }
+
+  function handleCardDragLeave(event: DragEvent<HTMLElement>) {
+    if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setCardDropTarget(null)
+  }
+
+  function handleCardDrop(event: DragEvent<HTMLElement>, targetImage: UiImage, moduleImages: UiImage[]) {
+    event.preventDefault()
+    event.stopPropagation()
+    const transferId = event.dataTransfer.getData(UI_IMAGE_DRAG_TYPE)
+    const image = gameImages.find((item) => item.id === (transferId || draggingId))
+    const placement = cardPlacement(event, targetImage, moduleImages)
+    setDropTarget(null)
+    setCardDropTarget(null)
+    setDraggingId(null)
+    if (image && placement && canMove && !busyRef.current) void placeImage(image, targetImage.moduleId, placement.beforeImageId)
   }
 
   function requestDeletion(ids: string[]) {
@@ -174,7 +213,26 @@ function GameDetails({ gameId }: { gameId: string | undefined }) {
       <Link className="back-link" to="/"><ArrowLeft size={16} /> 返回书架</Link>
       <header className="game-hero" style={{ '--cover-tone': game.coverTone } as CSSProperties}>
         <div className="game-hero-cover">
-          {game.coverUrl ? <img src={game.coverUrl} alt="" /> : <span>{game.name.slice(0, 2)}</span>}
+          {game.coverUrl ? (
+            <img
+              src={game.coverUrl}
+              alt={`${game.name}游戏封面`}
+              style={{ objectPosition: `${game.coverFocusX}% ${game.coverFocusY}%` }}
+            />
+          ) : <span>{game.name.slice(0, 2)}</span>}
+          {canManageCover && (
+            <button
+              type="button"
+              className="game-cover-edit-button"
+              aria-label={game.coverUrl ? '更换或调整游戏封面' : '设置游戏封面'}
+              disabled={busy}
+              onClick={() => {
+                if (busyRef.current) return
+                setMutationError(null)
+                setEditingCover({})
+              }}
+            ><ImagePlus size={15} /> {game.coverUrl ? '更换或调整' : '设置封面'}</button>
+          )}
         </div>
         <div className="game-hero-copy">
           <p className="eyebrow">GAME UI COLLECTION</p>
@@ -194,10 +252,10 @@ function GameDetails({ gameId }: { gameId: string | undefined }) {
       </header>
 
       {(canDeleteImages || canMove) && <div className="game-management-bar">
-        <p>这里用于模块与图片调整：勾选图片可跨模块批量删除；点击移动手柄可调整所属模块。</p>
+        <p>这里用于模块与图片调整：勾选图片可跨模块批量删除；拖动移动手柄可调整模块和展示顺序，点击则可精确选择位置。</p>
       </div>}
       {warning && <div className="management-warning" role="status">{warning}</div>}
-      {mutationError && !deletion && !movingImage && <div className="editor-error" role="alert">{mutationError}</div>}
+      {mutationError && !deletion && !movingImage && !editingCover && <div className="editor-error" role="alert">{mutationError}</div>}
       {selectedIds.length > 0 && <div className="selection-toolbar" role="toolbar" aria-label="图片批量管理">
         <strong>已选 {selectedIds.length} 张</strong>
         <button className="danger-button" type="button" disabled={busy} onClick={() => requestDeletion(selectedIds)}>删除已选</button>
@@ -243,23 +301,20 @@ function GameDetails({ gameId }: { gameId: string | undefined }) {
                 </div>
               </header>
               {moduleImages.length ? (
-                groupForDisplay(moduleImages).map((group) => (
-                  <div className="flow-group" key={group.key}>
-                    {group.flowName && (
-                      <div className="flow-heading">
-                        <h3>{group.flowName}</h3>
-                        <span>{group.images.length} 步</span>
-                      </div>
-                    )}
-                    <div className="image-grid">
-                      {group.images.map((image) => <ImageCard key={image.id} image={image} onOpen={(item) => { if (!busyRef.current) setSelectedImage(item) }} busy={busy}
-                        selected={selectedIds.includes(image.id)}
-                        onSelect={canDeleteImages ? (id, selected) => setSelectedIds((current) => selected ? [...new Set([...current, id])] : current.filter((item) => item !== id)) : undefined}
-                        onMove={canMove ? (item) => { if (busyRef.current) return; setMutationError(null); setMovingImage(item) } : undefined}
-                        onDragImage={(id) => { setDraggingId(id); if (!id) setDropTarget(null) }} />)}
-                    </div>
-                  </div>
-                ))
+                <div className="image-grid">
+                  {moduleImages.map((image) => <ImageCard key={image.id} image={image} onOpen={(item) => { if (!busyRef.current) setSelectedImage(item) }} busy={busy}
+                    selected={selectedIds.includes(image.id)}
+                    onSelect={canDeleteImages ? (id, selected) => setSelectedIds((current) => selected ? [...new Set([...current, id])] : current.filter((item) => item !== id)) : undefined}
+                    onMove={canMove ? (item) => { if (busyRef.current) return; setMutationError(null); setMovingImage(item) } : undefined}
+                    onDragImage={(id) => {
+                      setDraggingId(id)
+                      if (!id) { setDropTarget(null); setCardDropTarget(null) }
+                    }}
+                    dropSide={cardDropTarget?.imageId === image.id ? cardDropTarget.side : undefined}
+                    onDragOverCard={canMove ? (event) => handleCardDragOver(event, image, moduleImages) : undefined}
+                    onDragLeaveCard={canMove ? handleCardDragLeave : undefined}
+                    onDropCard={canMove ? (event) => handleCardDrop(event, image, moduleImages) : undefined} />)}
+                </div>
               ) : (
                 <div className="module-empty">这个模块还没有截图</div>
               )}
@@ -270,19 +325,16 @@ function GameDetails({ gameId }: { gameId: string | undefined }) {
 
       {selectedImage && (
         <ImageViewer
-          images={groupForDisplay(gameImages.filter((image) => image.moduleId === selectedImage.moduleId))
-            .find((group) => group.images.some((image) => image.id === selectedImage.id))?.images ?? [selectedImage]}
+          images={gameImages.filter((image) => image.moduleId === selectedImage.moduleId).sort(compareImages)}
           initialImageId={selectedImage.id}
           onClose={() => { if (!busyRef.current) setSelectedImage(null) }}
           suspended={Boolean(deletion) || busy}
           onDelete={canDeleteImages ? (image) => requestDeletion([image.id]) : undefined}
-          onSetCover={canSetCover && repository.setGameCoverFromImage ? async (image) => {
+          onSetCover={canManageCover ? async (image) => {
             if (!gameImages.some((item) => item.id === image.id)) throw new Error('这张图片已不在当前游戏中')
-            await mutate(
-              () => repository.setGameCoverFromImage!(game.id, image.id),
-              () => setSelectedImage(null),
-              true,
-            )
+            setSelectedImage(null)
+            setMutationError(null)
+            setEditingCover({ initialImage: image })
           } : undefined}
           onSaveMetadata={editable && repository.updateImageMetadata ? async (imageId, update) => {
             if (!gameImages.some((image) => image.id === imageId)) return
@@ -299,9 +351,25 @@ function GameDetails({ gameId }: { gameId: string | undefined }) {
           }}
         />
       )}
-      {movingImage && <MoveImageDialog image={movingImage} modules={modules} busy={busy} error={mutationError}
+      {movingImage && <MoveImageDialog image={movingImage} modules={modules} images={gameImages} busy={busy} error={mutationError}
         onClose={() => { if (!busy) { setMovingImage(null); setMutationError(null) } }}
-        onMove={(target) => void moveImage(movingImage, target)} />}
+        onMove={(target, beforeImageId) => void placeImage(movingImage, target, beforeImageId)} />}
+      {editingCover && (
+        <GameCoverEditor
+          images={gameImages.slice().sort(compareImages)}
+          initialImage={editingCover.initialImage}
+          currentCoverUrl={game.coverUrl}
+          initialFocus={{ x: game.coverFocusX, y: game.coverFocusY }}
+          busy={busy}
+          error={mutationError}
+          onClose={() => {
+            if (busy) return
+            setEditingCover(null)
+            setMutationError(null)
+          }}
+          onSave={({ image, focus }) => void saveCover(image, focus)}
+        />
+      )}
       {deletion && <DeleteConfirmDialog count={deletion.ids.length} target={{ kind: 'images' }} busy={busy} error={mutationError}
         onClose={() => { if (!busy) { setDeletion(null); setMutationError(null) } }} onConfirm={() => void confirmDeletion()} />}
     </main>

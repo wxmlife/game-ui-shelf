@@ -143,6 +143,8 @@ function coverClient(options: {
     id: 'game-1', owner_id: 'user-1',
     cover_thumbnail_path: 'user-1/game-1/covers/old/thumbnail.webp',
     cover_original_path: 'user-1/game-1/covers/old/original.png' as string | null,
+    cover_focus_x: 50,
+    cover_focus_y: 50,
   }
   for (const [bucket, path] of [
     ['game-ui-originals', game.cover_original_path],
@@ -184,7 +186,9 @@ function coverClient(options: {
       return { select: vi.fn(() => query) }
     }),
     rpc: vi.fn(async (name: string, args: Record<string, unknown>) => {
-      if (name !== 'set_game_cover_from_image') return cleanupRpc(name, args)
+      if (name !== 'set_game_cover_from_image' && name !== 'set_game_cover_from_image_with_focus') {
+        return cleanupRpc(name, args)
+      }
       if (options.rpcError) return { data: null, error: options.rpcError }
       if (options.unknownRpcFailure) throw new Error('connection lost')
       const newPath = args.p_cover_thumbnail_path as string
@@ -196,6 +200,13 @@ function coverClient(options: {
       }
       game.cover_thumbnail_path = newPath
       game.cover_original_path = null
+      if (name === 'set_game_cover_from_image_with_focus') {
+        game.cover_focus_x = args.p_focus_x as number
+        game.cover_focus_y = args.p_focus_y as number
+      } else {
+        game.cover_focus_x = 50
+        game.cover_focus_y = 50
+      }
       if (options.loseRpcResponse) throw new Error('connection lost')
       return { data: null, error: null }
     }),
@@ -240,7 +251,8 @@ describe('SupabaseLibraryRepository', () => {
     const rows: Record<string, unknown[]> = {
       games: [{
         id: 'game-1', slug: 'idol', name: 'IDOL', aliases: ['偶像'], cover_thumbnail_path: 'user-1/game-1/cover.webp',
-        cover_tone: '#112233', developer: 'Studio', platforms: ['iOS'], tags: ['模拟'], image_count: 1,
+        cover_tone: '#112233', cover_focus_x: 37.5, cover_focus_y: 62.5,
+        developer: 'Studio', platforms: ['iOS'], tags: ['模拟'], image_count: 1,
         updated_at: '2026-10-09T00:00:00Z', description: 'demo',
       }],
       capture_sets: [{ id: 'set-1', game_id: 'game-1', platform: 'iOS', version: '1.0', region: null, captured_at: null, source_url: null, note: null }],
@@ -272,7 +284,12 @@ describe('SupabaseLibraryRepository', () => {
 
     const snapshot = await repository.getSnapshot()
 
-    expect(snapshot.games[0]).toMatchObject({ name: 'IDOL', coverUrl: 'signed://game-ui-thumbnails/user-1/game-1/cover.webp' })
+    expect(snapshot.games[0]).toMatchObject({
+      name: 'IDOL',
+      coverUrl: 'signed://game-ui-thumbnails/user-1/game-1/cover.webp',
+      coverFocusX: 37.5,
+      coverFocusY: 62.5,
+    })
     expect(snapshot.images[0]).toMatchObject({
       moduleKey: 'reward', moduleName: '奖励', flowName: '领取奖励', tags: ['弹窗', '奖励'],
       imageUrl: 'signed://game-ui-originals/user-1/game-1/image-1/original.png',
@@ -577,7 +594,7 @@ describe('SupabaseLibraryRepository', () => {
     }))
   })
 
-  it('uses one transactional RPC when updating image metadata and tags', async () => {
+  it('updates image metadata and tags without sending the legacy sequence order', async () => {
     const rpc = vi.fn().mockResolvedValue({ data: null, error: null })
     const client = {
       auth: { getSession: vi.fn().mockResolvedValue(session()) },
@@ -589,16 +606,14 @@ describe('SupabaseLibraryRepository', () => {
       moduleId: 'module-1',
       title: '奖励领取成功',
       flowName: '领取奖励',
-      sequenceOrder: 3,
       tags: ['奖励', '反馈', '奖励'],
     })
 
-    expect(rpc).toHaveBeenCalledWith('update_ui_image_metadata_with_tags', {
+    expect(rpc).toHaveBeenCalledWith('update_ui_image_metadata_without_order', {
       p_image_id: 'image-1',
       p_module_id: 'module-1',
       p_title: '奖励领取成功',
       p_flow_name: '领取奖励',
-      p_sequence_order: 3,
       p_search_text: '奖励领取成功 领取奖励 奖励 反馈',
       p_tags: ['奖励', '反馈'],
     })
@@ -615,6 +630,52 @@ describe('SupabaseLibraryRepository', () => {
       p_image_id: 'image-1', p_target_module_id: 'module-2',
     })
     expect(calls).toEqual([])
+  })
+
+  it.each([
+    ['before another image', 'image-2'],
+    ['at the end', null],
+  ])('places an image %s through one atomic RPC', async (_case, beforeImageId) => {
+    const { client, rpc, calls } = mutationClient()
+    const repository = new SupabaseLibraryRepository(client as never)
+
+    const result = await repository.placeImage('image-1', 'module-2', beforeImageId)
+
+    expect(result.status).toBe('complete')
+    expect(rpc).toHaveBeenCalledExactlyOnceWith('place_ui_image', {
+      p_image_id: 'image-1',
+      p_target_module_id: 'module-2',
+      p_before_image_id: beforeImageId,
+    })
+    expect(calls).toEqual([])
+  })
+
+  it('updates the game cover focal point through one owner-scoped RPC', async () => {
+    const { client, rpc } = mutationClient()
+    const repository = new SupabaseLibraryRepository(client as never)
+
+    const result = await repository.updateGameCoverFocus('game-1', 23.5, 81.25)
+
+    expect(result.status).toBe('complete')
+    expect(rpc).toHaveBeenCalledExactlyOnceWith('update_game_cover_focus', {
+      p_game_id: 'game-1',
+      p_focus_x: 23.5,
+      p_focus_y: 81.25,
+    })
+  })
+
+  it.each([
+    [-0.01, 50],
+    [100.01, 50],
+    [50, Number.NaN],
+    [50, Number.POSITIVE_INFINITY],
+  ])('rejects an invalid cover focal point before calling the database (%s, %s)', async (x, y) => {
+    const { client, rpc } = mutationClient()
+    const repository = new SupabaseLibraryRepository(client as never)
+
+    await expect(repository.updateGameCoverFocus('game-1', x, y)).rejects.toThrow('封面焦点必须在 0 到 100 之间')
+
+    expect(rpc).not.toHaveBeenCalled()
   })
 
   it('copies an existing thumbnail into an independent cover before the atomic update and cleans old covers', async () => {
@@ -638,6 +699,52 @@ describe('SupabaseLibraryRepository', () => {
       `game-ui-thumbnails:${image.thumbnail_path}`,
       `game-ui-thumbnails:${copies[0].to}`,
     ]))
+  })
+
+  it('centers focus when the legacy cover endpoint actually replaces the cover', async () => {
+    const { client, game } = coverClient()
+    game.cover_focus_x = 12
+    game.cover_focus_y = 88
+    const repository = new SupabaseLibraryRepository(client as never)
+
+    await repository.setGameCoverFromImage('game-1', 'image-1')
+
+    expect(game).toMatchObject({ cover_focus_x: 50, cover_focus_y: 50 })
+  })
+
+  it('sets the cover and focal point through one atomic RPC while preserving cleanup semantics', async () => {
+    const { client, copies, game, queue } = coverClient()
+    const repository = new SupabaseLibraryRepository(client as never)
+
+    const result = await repository.setGameCoverFromImageWithFocus('game-1', 'image-1', 23.5, 81.25)
+
+    expect(result).toEqual({ status: 'complete', pendingCleanup: 0 })
+    expect(client.rpc).toHaveBeenCalledWith('set_game_cover_from_image_with_focus', {
+      p_game_id: 'game-1',
+      p_image_id: 'image-1',
+      p_cover_thumbnail_path: copies[0].to,
+      p_focus_x: 23.5,
+      p_focus_y: 81.25,
+    })
+    expect(game).toMatchObject({
+      cover_thumbnail_path: copies[0].to,
+      cover_original_path: null,
+      cover_focus_x: 23.5,
+      cover_focus_y: 81.25,
+    })
+    expect(queue).toEqual([])
+  })
+
+  it('returns partial after an atomic cover/focus commit when old-cover cleanup remains queued', async () => {
+    const { client, copies, game, queue } = coverClient({ cleanupFails: true })
+    const repository = new SupabaseLibraryRepository(client as never)
+
+    const result = await repository.setGameCoverFromImageWithFocus('game-1', 'image-1', 20, 80)
+
+    expect(result).toMatchObject({ status: 'partial', pendingCleanup: 2, message: expect.stringContaining('封面已更新') })
+    expect(game).toMatchObject({ cover_thumbnail_path: copies[0].to, cover_focus_x: 20, cover_focus_y: 80 })
+    expect(queue).toHaveLength(2)
+    expect(queue.every((row) => row.path !== copies[0].to)).toBe(true)
   })
 
   it('uses a fresh cover path for each replacement and never removes the source screenshot', async () => {

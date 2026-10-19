@@ -30,7 +30,6 @@ export function ImageViewer({ images, initialImageId, onClose, onSaveMetadata, o
   const [editing, setEditing] = useState(false)
   const [title, setTitle] = useState('')
   const [flowName, setFlowName] = useState('')
-  const [sequenceOrder, setSequenceOrder] = useState('0')
   const [tags, setTags] = useState('')
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
@@ -75,7 +74,6 @@ export function ImageViewer({ images, initialImageId, onClose, onSaveMetadata, o
     if (!image || suspended) return
     setTitle(image.title)
     setFlowName(image.flowName ?? '')
-    setSequenceOrder(String(image.sequenceOrder))
     setTags(image.tags.join(', '))
     setSaveError(null)
     setEditing(true)
@@ -90,7 +88,6 @@ export function ImageViewer({ images, initialImageId, onClose, onSaveMetadata, o
         moduleId: image.moduleId,
         title: title.trim(),
         flowName: flowName.trim(),
-        sequenceOrder: Number(sequenceOrder) || 0,
         tags: tags.split(/[,，]/).map((tag) => tag.trim()).filter(Boolean),
       })
     } catch (caught) {
@@ -144,7 +141,6 @@ export function ImageViewer({ images, initialImageId, onClose, onSaveMetadata, o
             <label><span>图片标题</span><input aria-label="图片标题" value={title} onChange={(event) => setTitle(event.target.value)} /></label>
             <label><span>流程名称</span><input aria-label="流程名称" value={flowName} onChange={(event) => setFlowName(event.target.value)} /></label>
             <label><span>图片标签</span><input aria-label="图片标签" value={tags} onChange={(event) => setTags(event.target.value)} /></label>
-            <label><span>序列顺序</span><input aria-label="序列顺序" type="number" value={sequenceOrder} onChange={(event) => setSequenceOrder(event.target.value)} /></label>
             {saveError && <div className="editor-error" role="alert">{saveError}</div>}
             <div className="viewer-editor-actions">
               <button className="secondary-button" type="button" onClick={() => setEditing(false)}>取消</button>

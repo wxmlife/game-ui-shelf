@@ -20,7 +20,7 @@ export function GameCard({ game, managementMode = false, busy = false, onDelete 
   return (
     <article className={`game-card${managementMode ? ' game-card--managing' : ''}`} style={{ '--cover-tone': game.coverTone } as CSSProperties}>
       <Link className="game-card-cover" to={`/game/${game.id}`} aria-label={`打开 ${game.name}`}>
-        {game.coverUrl ? <img src={game.coverUrl} alt="" /> : <span>{game.name.slice(0, 2)}</span>}
+        {game.coverUrl ? <img src={game.coverUrl} alt="" style={{ objectPosition: `${game.coverFocusX}% ${game.coverFocusY}%` }} /> : <span>{game.name.slice(0, 2)}</span>}
         <span className="game-card-open"><ArrowUpRight size={18} /></span>
       </Link>
       {managementMode && onDelete && (

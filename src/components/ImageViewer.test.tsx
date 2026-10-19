@@ -77,6 +77,30 @@ describe('ImageViewer', () => {
     expect(screen.getByRole('dialog')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '设为游戏封面' })).toBeEnabled()
   })
+
+  it('saves descriptive metadata without sending a stale display order', async () => {
+    const user = userEvent.setup()
+    const onSaveMetadata = vi.fn().mockResolvedValue(undefined)
+
+    render(
+      <ImageViewer
+        images={images}
+        initialImageId={images[0].id}
+        onClose={vi.fn()}
+        onSaveMetadata={onSaveMetadata}
+      />,
+    )
+
+    await user.click(screen.getByRole('button', { name: '编辑图片资料' }))
+    await user.click(screen.getByRole('button', { name: '保存图片资料' }))
+
+    expect(onSaveMetadata).toHaveBeenCalledWith(images[0].id, {
+      moduleId: images[0].moduleId,
+      title: images[0].title,
+      flowName: images[0].flowName ?? '',
+      tags: images[0].tags,
+    })
+  })
 })
 
 describe('ImageViewer keyboard behavior', () => {

@@ -1,4 +1,5 @@
 import { GripVertical, Maximize2 } from 'lucide-react'
+import type { DragEvent } from 'react'
 
 import type { UiImage } from '../domain/models'
 
@@ -10,14 +11,26 @@ interface ImageCardProps {
   onSelect?: (imageId: string, selected: boolean) => void
   onMove?: (image: UiImage) => void
   onDragImage?: (imageId: string | null) => void
+  dropSide?: 'before' | 'after'
+  onDragOverCard?: (event: DragEvent<HTMLElement>) => void
+  onDragLeaveCard?: (event: DragEvent<HTMLElement>) => void
+  onDropCard?: (event: DragEvent<HTMLElement>) => void
 }
 
-export function ImageCard({ image, onOpen, selected, busy, onSelect, onMove, onDragImage }: ImageCardProps) {
+export function ImageCard({
+  image, onOpen, selected, busy, onSelect, onMove, onDragImage,
+  dropSide, onDragOverCard, onDragLeaveCard, onDropCard,
+}: ImageCardProps) {
   return (
-    <article className={`image-card${selected ? ' is-selected' : ''}`}>
+    <article
+      className={`image-card${selected ? ' is-selected' : ''}${dropSide ? ` is-drop-${dropSide}` : ''}`}
+      onDragOver={onDragOverCard}
+      onDragLeave={onDragLeaveCard}
+      onDrop={onDropCard}
+    >
       {(onSelect || onMove) && <div className="image-card-controls">
         {onSelect && <label><input type="checkbox" aria-label={`选择 ${image.title}`} checked={Boolean(selected)} disabled={busy} onChange={(event) => onSelect(image.id, event.target.checked)} /> 选择</label>}
-        {onMove && <button type="button" className="image-move-handle" aria-label={`移动 ${image.title} 到模块`} disabled={busy} draggable={!busy}
+        {onMove && <button type="button" className="image-move-handle" aria-label={`移动 ${image.title} 到模块或位置`} disabled={busy} draggable={!busy}
           onClick={() => onMove(image)}
           onDragStart={(event) => { event.dataTransfer.setData('application/x-ui-image', image.id); event.dataTransfer.effectAllowed = 'move'; onDragImage?.(image.id) }}
           onDragEnd={() => onDragImage?.(null)}><GripVertical size={16} /> 移动</button>}

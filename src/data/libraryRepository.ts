@@ -52,7 +52,6 @@ export interface ImageMetadataUpdate {
   moduleId: string
   title: string
   flowName: string
-  sequenceOrder: number
   tags: string[]
 }
 
@@ -63,6 +62,9 @@ export interface LibraryRepository {
   updateModule?(moduleId: string, update: ModuleUpdate): Promise<MutationResult>
   updateImageMetadata?(imageId: string, update: ImageMetadataUpdate): Promise<MutationResult>
   setGameCoverFromImage?(gameId: string, imageId: string): Promise<MutationResult>
+  setGameCoverFromImageWithFocus?(gameId: string, imageId: string, x: number, y: number): Promise<MutationResult>
+  updateGameCoverFocus?(gameId: string, x: number, y: number): Promise<MutationResult>
+  placeImage?(imageId: string, targetModuleId: string, beforeImageId: string | null): Promise<MutationResult>
   moveImage?(imageId: string, targetModuleId: string): Promise<MutationResult>
   deleteImages?(imageIds: string[]): Promise<MutationResult>
   deleteGame?(gameId: string): Promise<MutationResult>

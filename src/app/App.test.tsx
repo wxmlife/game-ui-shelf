@@ -18,7 +18,9 @@ describe('App browsing experience', () => {
     renderAt('#/')
 
     expect(await screen.findByRole('heading', { name: '游戏书架' })).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: '打开 IDOL Empire' })).toBeInTheDocument()
+    const gameLink = screen.getByRole('link', { name: '打开 IDOL Empire' })
+    expect(gameLink).toBeInTheDocument()
+    expect(gameLink.querySelector('img')).toHaveStyle({ objectPosition: '50% 50%' })
     expect(screen.getByText('4 本游戏')).toBeInTheDocument()
   })
 
@@ -49,12 +51,12 @@ describe('App browsing experience', () => {
     expect(screen.getByText('找到 1 张截图')).toBeInTheDocument()
   })
 
-  it('groups a known game by module and flow', async () => {
+  it('shows a known game in one flat grid per module', async () => {
     renderAt('#/game/idol-empire')
 
     expect(await screen.findByRole('heading', { name: 'IDOL Empire' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '奖励' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: '领取奖励' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: '领取奖励' })).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: '查看 奖励详情' })).toBeInTheDocument()
   })
 

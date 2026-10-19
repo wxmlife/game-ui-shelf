@@ -7,6 +7,8 @@ export interface Game {
   aliases: string[]
   coverUrl?: string
   coverTone: string
+  coverFocusX: number
+  coverFocusY: number
   developer?: string
   platforms: string[]
   tags: string[]

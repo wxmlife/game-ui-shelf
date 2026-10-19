@@ -12,6 +12,8 @@ const snapshot: LibrarySnapshot = {
       aliases: ['Z', 'A'],
       coverUrl: 'https://storage.example/z-cover.png?token=cover-secret',
       coverTone: '#222222',
+      coverFocusX: 35,
+      coverFocusY: 70,
       platforms: ['PC', 'Android'],
       tags: ['RPG', '动作'],
       imageCount: 1,
@@ -23,6 +25,8 @@ const snapshot: LibrarySnapshot = {
       name: 'Alpha',
       aliases: [],
       coverTone: '#111111',
+      coverFocusX: 50,
+      coverFocusY: 50,
       platforms: ['iOS'],
       tags: [],
       imageCount: 1,
@@ -97,6 +101,7 @@ describe('createLibraryExport', () => {
       'z-image',
     ])
     expect(parsed.data.games[1].aliases).toEqual(['A', 'Z'])
+    expect(parsed.data.games[1]).toMatchObject({ coverFocusX: 35, coverFocusY: 70 })
     expect(parsed.data.games[1].platforms).toEqual(['Android', 'PC'])
     expect(parsed.data.images[1].tags).toEqual(['反馈', '奖励'])
     expect(createLibraryExport(snapshot, '2026-10-09T12:00:00.000Z')).toBe(exported)

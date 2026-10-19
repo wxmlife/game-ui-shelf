@@ -44,6 +44,8 @@ function exportGame(game: Game): LibraryExport['data']['games'][number] {
     aliases: sortedStrings(game.aliases),
     coverUrl: null,
     coverTone: game.coverTone,
+    coverFocusX: game.coverFocusX,
+    coverFocusY: game.coverFocusY,
     developer: game.developer,
     platforms: sortedStrings(game.platforms),
     tags: sortedStrings(game.tags),

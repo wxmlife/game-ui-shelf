@@ -196,6 +196,7 @@ h1, h2, h3, .brand-copy strong { font-family: "SF Pro Display", "PingFang SC", s
 .game-card-cover { position: relative; display: block; overflow: hidden; aspect-ratio: 1.36; background: linear-gradient(145deg, var(--cover-tone), #171b19 80%); }
 .game-card-cover::after { position: absolute; inset: 0; background: linear-gradient(0deg, rgba(0,0,0,0.42), transparent 45%); content: ''; }
 .game-card-cover img { width: 100%; height: 100%; object-fit: cover; transition: transform 350ms ease; }
+.game-card-cover > span:not(.game-card-open) { display: grid; width: 100%; height: 100%; place-items: center; }
 .game-card:hover .game-card-cover img { transform: scale(1.035); }
 .game-card-open { position: absolute; right: 12px; top: 12px; z-index: 1; display: grid; width: 34px; height: 34px; place-items: center; border-radius: 50%; background: rgba(10,13,12,0.72); opacity: 0; transform: translateY(4px); transition: 160ms ease; }
 .game-card:hover .game-card-open { opacity: 1; transform: translateY(0); }
@@ -234,6 +235,11 @@ h1, h2, h3, .brand-copy strong { font-family: "SF Pro Display", "PingFang SC", s
 .game-hero::after { position: absolute; right: -80px; top: -150px; width: 380px; height: 380px; border: 1px solid rgba(255,255,255,0.08); border-radius: 50%; content: ''; }
 .game-hero-cover { position: relative; z-index: 1; overflow: hidden; aspect-ratio: 4 / 5; border-radius: 15px; background: var(--surface-3); box-shadow: 0 24px 50px rgba(0,0,0,0.25); }
 .game-hero-cover img { width: 100%; height: 100%; object-fit: cover; }
+.game-hero-cover > span { display: grid; width: 100%; height: 100%; place-items: center; color: rgba(255,255,255,0.78); font-size: 25px; font-weight: 800; }
+.game-cover-edit-button { position: absolute; inset: auto 8px 8px; z-index: 2; display: inline-flex; min-height: 38px; align-items: center; justify-content: center; gap: 6px; padding: 0 10px; border: 1px solid rgba(255,255,255,0.2); border-radius: 9px; background: rgba(8,11,10,0.88); color: #fff; font-size: 10px; font-weight: 700; box-shadow: 0 8px 24px rgba(0,0,0,0.28); backdrop-filter: blur(10px); }
+.game-cover-edit-button:hover { border-color: rgba(216,255,98,0.55); color: var(--accent); }
+.game-cover-edit-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.game-cover-edit-button:disabled { opacity: 0.45; cursor: not-allowed; }
 .game-hero-copy { position: relative; z-index: 1; padding-bottom: 3px; }
 .game-hero h1 { font-size: clamp(36px, 4vw, 62px); }
 .game-alias { margin: 8px 0 0; color: rgba(255,255,255,0.62); font-size: 13px; }
@@ -284,6 +290,8 @@ h1, h2, h3, .brand-copy strong { font-family: "SF Pro Display", "PingFang SC", s
 .selection-toolbar { position: sticky; bottom: 20px; z-index: 25; display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 18px; padding: 12px 16px; border: 1px solid rgba(216,255,98,0.35); border-radius: 12px; background: #1c211f; box-shadow: 0 8px 24px #0005; font-size: 13px; }
 .selection-toolbar strong { margin-right: auto; }
 .image-card.is-selected { border-color: var(--accent); }
+.image-card.is-drop-before { box-shadow: -5px 0 0 var(--accent); }
+.image-card.is-drop-after { box-shadow: 5px 0 0 var(--accent); }
 .image-card-controls { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px; padding: 5px 8px; border-bottom: 1px solid var(--line); }
 .image-card-controls label { display: inline-flex; align-items: center; gap: 4px; min-height: 44px; color: var(--muted); font-size: 11px; cursor: pointer; }
 .image-card-controls input { width: 18px; height: 18px; accent-color: var(--accent); }
@@ -333,6 +341,46 @@ h1, h2, h3, .brand-copy strong { font-family: "SF Pro Display", "PingFang SC", s
 .editor-card > p:not(.eyebrow) { margin: -5px 0 4px; color: var(--muted); font-size: 10px; }
 .editor-close { position: absolute; right: 14px; top: 14px; display: grid; width: 32px; height: 32px; place-items: center; border: 0; border-radius: 8px; background: var(--surface-3); color: var(--muted); }
 .editor-error { padding: 9px 10px; border: 1px solid rgba(255,109,109,0.25); border-radius: 7px; background: rgba(255,109,109,0.07); color: #ff9c9c; font-size: 9px; }
+
+.cover-editor-backdrop { overflow-y: auto; }
+.cover-editor { width: min(1040px, 100%); max-height: calc(100dvh - 48px); overflow-y: auto; gap: 22px; }
+.cover-editor-heading, .cover-editor-section-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; }
+.cover-editor-heading h2 { margin-top: 3px; }
+.cover-editor-heading p:not(.eyebrow) { max-width: 610px; margin: 7px 0 0; color: var(--muted); font-size: 11px; line-height: 1.65; }
+.icon-button { display: grid; flex: 0 0 auto; width: 40px; height: 40px; place-items: center; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-2); color: #fff; font-size: 22px; }
+.cover-editor-workspace { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(280px, 0.85fr); gap: 18px; }
+.cover-editor-focus-panel, .cover-editor-previews, .cover-editor-candidates { min-width: 0; padding: 16px; border: 1px solid var(--line); border-radius: 14px; background: rgba(255,255,255,0.02); }
+.cover-editor h3 { margin: 0 0 12px; font-size: 13px; }
+.cover-focus-control { position: relative; overflow: hidden; aspect-ratio: 16 / 9; border: 1px solid var(--line); border-radius: 11px; background: #080a09; cursor: crosshair; touch-action: none; }
+.cover-focus-control img { width: 100%; height: 100%; object-fit: contain; object-position: center; pointer-events: none; user-select: none; }
+.cover-focus-control:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.cover-focus-marker { position: absolute; width: 22px; height: 22px; border: 2px solid #fff; border-radius: 50%; box-shadow: 0 0 0 2px rgba(0,0,0,0.65), 0 4px 14px rgba(0,0,0,0.45); transform: translate(-50%, -50%); pointer-events: none; }
+.cover-focus-marker::before, .cover-focus-marker::after { position: absolute; background: #fff; content: ''; }
+.cover-focus-marker::before { left: 50%; top: -6px; width: 1px; height: 30px; transform: translateX(-50%); }
+.cover-focus-marker::after { left: -6px; top: 50%; width: 30px; height: 1px; transform: translateY(-50%); }
+.cover-focus-sliders { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 14px; }
+.cover-focus-sliders label { grid-template-columns: 1fr auto; align-items: center; }
+.cover-focus-sliders label > span { grid-column: 1 / -1; }
+.cover-focus-sliders input[type="range"] { height: 26px; padding: 0; border: 0; background: transparent; accent-color: var(--accent); }
+.cover-focus-sliders output { min-width: 38px; color: var(--accent); font-family: monospace; font-size: 10px; text-align: right; }
+.cover-preview-grid { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(90px, 0.65fr); align-items: end; gap: 12px; }
+.cover-preview { margin: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 10px; background: #080a09; }
+.cover-preview-image { overflow: hidden; background: #080a09; }
+.cover-preview-landscape { aspect-ratio: 1.6; }
+.cover-preview-portrait { aspect-ratio: 4 / 5; }
+.cover-preview-image img, .cover-preview-image > span { display: grid; width: 100%; height: 100%; place-items: center; object-fit: cover; color: var(--muted); font-size: 10px; }
+.cover-preview figcaption { display: grid; height: 28px; place-items: center; border-top: 1px solid var(--line); color: var(--muted); font-size: 9px; }
+.cover-editor-section-heading { align-items: center; }
+.cover-editor-section-heading h3 { margin: 0; }
+.cover-editor-section-heading span { color: var(--muted); font-size: 10px; }
+.cover-candidate-grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px; max-height: 250px; margin-top: 12px; overflow-y: auto; }
+.cover-candidate { min-width: 0; overflow: hidden; padding: 0; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-2); color: #e8ebe9; text-align: left; }
+.cover-candidate img { display: block; width: 100%; aspect-ratio: 0.78; object-fit: cover; }
+.cover-candidate span { display: block; overflow: hidden; padding: 8px; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.cover-candidate:hover, .cover-candidate.is-selected { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(216,255,98,0.1); }
+.cover-candidate:focus-visible, .cover-editor .icon-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.cover-editor-empty { display: grid; min-height: 110px; place-items: center; color: var(--muted); font-size: 11px; text-align: center; }
+.cover-editor-actions { margin-top: 0; }
 
 .upload-page { max-width: 1240px; }
 .upload-hero { display: flex; align-items: flex-end; justify-content: space-between; gap: 36px; margin-bottom: 28px; }
@@ -477,6 +525,8 @@ h1, h2, h3, .brand-copy strong { font-family: "SF Pro Display", "PingFang SC", s
   .game-grid, .game-grid--search { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .game-hero { grid-template-columns: 120px 1fr; }
   .game-upload-button { display: none; }
+  .cover-editor-workspace { grid-template-columns: 1fr; }
+  .cover-candidate-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
   .image-grid, .image-grid--search { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .viewer-backdrop { grid-template-columns: 1fr; overflow-y: auto; }
   .viewer-canvas { min-height: 70vh; }
@@ -503,6 +553,12 @@ h1, h2, h3, .brand-copy strong { font-family: "SF Pro Display", "PingFang SC", s
   .game-grid, .game-grid--search { grid-template-columns: 1fr; }
   .game-card-cover { aspect-ratio: 1.6; }
   .game-hero { grid-template-columns: 86px 1fr; gap: 16px; padding: 16px; }
+  .game-cover-edit-button { inset: auto 5px 5px; min-width: 34px; min-height: 34px; padding: 0; font-size: 0; }
+  .cover-editor-backdrop { align-items: start; padding: 12px; }
+  .cover-editor { max-height: calc(100dvh - 24px); padding: 18px; }
+  .cover-editor-heading p:not(.eyebrow) { font-size: 10px; }
+  .cover-focus-sliders { grid-template-columns: 1fr; }
+  .cover-candidate-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .game-meta-row { grid-column: 1 / -1; }
   .image-grid, .image-grid--search { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .module-heading h2 { font-size: 24px; }
