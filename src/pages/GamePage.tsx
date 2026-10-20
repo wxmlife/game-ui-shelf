@@ -31,6 +31,7 @@ export function GamePage() {
 function GameDetails({ gameId }: { gameId: string | undefined }) {
   const { snapshot, loading, error, repository, refresh } = useLibrary()
   const [selectedImage, setSelectedImage] = useState<UiImage | null>(null)
+  const [isManaging, setIsManaging] = useState(false)
   const [editingModule, setEditingModule] = useState<GameModule | null>(null)
   const [movingImage, setMovingImage] = useState<UiImage | null>(null)
   const [selectedIds, setSelectedIds] = useState<string[]>([])
@@ -51,6 +52,8 @@ function GameDetails({ gameId }: { gameId: string | undefined }) {
   const editable = repository.mode === 'cloud'
   const canMove = editable && Boolean(repository.placeImage)
   const canDeleteImages = editable && Boolean(repository.deleteImages)
+  const canEditModules = editable && Boolean(repository.updateModule)
+  const canManage = canMove || canDeleteImages || canEditModules
   const canManageCover = editable
     && Boolean(repository.setGameCoverFromImageWithFocus)
     && Boolean(repository.updateGameCoverFocus)
@@ -99,7 +102,7 @@ function GameDetails({ gameId }: { gameId: string | undefined }) {
   }
 
   async function placeImage(image: UiImage, targetModuleId: string, beforeImageId: string | null) {
-    if (!canMove || !repository.placeImage || busyRef.current || image.gameId !== gameId || !modules.some((module) => module.id === targetModuleId)) return
+    if (!isManaging || !canMove || !repository.placeImage || busyRef.current || image.gameId !== gameId || !modules.some((module) => module.id === targetModuleId)) return
     if (beforeImageId && !gameImages.some((item) => item.id === beforeImageId && item.moduleId === targetModuleId && item.id !== image.id)) return
     await mutate(() => repository.placeImage!(image.id, targetModuleId, beforeImageId), () => setMovingImage(null))
   }
@@ -119,9 +122,28 @@ function GameDetails({ gameId }: { gameId: string | undefined }) {
     )
   }
 
+  function startManaging(module: GameModule) {
+    if (!canManage || busyRef.current) return
+    setIsManaging(true)
+    setMutationError(null)
+    setEditingModule(canEditModules ? module : null)
+  }
+
+  function finishManaging() {
+    if (busyRef.current) return
+    setIsManaging(false)
+    setEditingModule(null)
+    setMovingImage(null)
+    setSelectedIds([])
+    setDraggingId(null)
+    setDropTarget(null)
+    setCardDropTarget(null)
+    setMutationError(null)
+  }
+
   function handleModuleDragOver(event: DragEvent<HTMLElement>, moduleId: string) {
     const hasTransferImage = Array.from(event.dataTransfer.types ?? []).includes(UI_IMAGE_DRAG_TYPE)
-    if (!canMove || busyRef.current || (!hasTransferImage && !draggingId)) return
+    if (!isManaging || !canMove || busyRef.current || (!hasTransferImage && !draggingId)) return
     event.preventDefault()
     event.dataTransfer.dropEffect = 'move'
     setCardDropTarget(null)
@@ -133,6 +155,7 @@ function GameDetails({ gameId }: { gameId: string | undefined }) {
   }
 
   function handleModuleDrop(event: DragEvent<HTMLElement>, moduleId: string) {
+    if (!isManaging || !canMove || busyRef.current) return
     event.preventDefault()
     event.stopPropagation()
     const transferId = event.dataTransfer.getData(UI_IMAGE_DRAG_TYPE)
@@ -159,7 +182,7 @@ function GameDetails({ gameId }: { gameId: string | undefined }) {
 
   function handleCardDragOver(event: DragEvent<HTMLElement>, targetImage: UiImage, moduleImages: UiImage[]) {
     const hasTransferImage = Array.from(event.dataTransfer.types ?? []).includes(UI_IMAGE_DRAG_TYPE)
-    if (!canMove || busyRef.current || (!hasTransferImage && !draggingId) || draggingId === targetImage.id) return
+    if (!isManaging || !canMove || busyRef.current || (!hasTransferImage && !draggingId) || draggingId === targetImage.id) return
     const placement = cardPlacement(event, targetImage, moduleImages)
     if (!placement) return
     event.preventDefault()
@@ -174,6 +197,7 @@ function GameDetails({ gameId }: { gameId: string | undefined }) {
   }
 
   function handleCardDrop(event: DragEvent<HTMLElement>, targetImage: UiImage, moduleImages: UiImage[]) {
+    if (!isManaging || !canMove || busyRef.current) return
     event.preventDefault()
     event.stopPropagation()
     const transferId = event.dataTransfer.getData(UI_IMAGE_DRAG_TYPE)
@@ -251,12 +275,16 @@ function GameDetails({ gameId }: { gameId: string | undefined }) {
         <Link className="primary-button game-upload-button" to="/upload"><Upload size={17} /> 添加截图</Link>
       </header>
 
-      {(canDeleteImages || canMove) && <div className="game-management-bar">
-        <p>这里用于模块与图片调整：勾选图片可跨模块批量删除；拖动移动手柄可调整模块和展示顺序，点击则可精确选择位置。</p>
+      {isManaging && canManage && <div className="game-management-bar">
+        <div>
+          <strong>图片编辑模式</strong>
+          <p>勾选图片可跨模块批量删除；拖动移动手柄可调整模块和展示顺序，点击则可精确选择位置。</p>
+        </div>
+        <button className="secondary-button" type="button" disabled={busy} onClick={finishManaging}>完成编辑</button>
       </div>}
       {warning && <div className="management-warning" role="status">{warning}</div>}
       {mutationError && !deletion && !movingImage && !editingCover && <div className="editor-error" role="alert">{mutationError}</div>}
-      {selectedIds.length > 0 && <div className="selection-toolbar" role="toolbar" aria-label="图片批量管理">
+      {isManaging && selectedIds.length > 0 && <div className="selection-toolbar" role="toolbar" aria-label="图片批量管理">
         <strong>已选 {selectedIds.length} 张</strong>
         <button className="danger-button" type="button" disabled={busy} onClick={() => requestDeletion(selectedIds)}>删除已选</button>
         <button className="secondary-button" type="button" disabled={busy} onClick={() => setSelectedIds([])}>取消选择</button>
@@ -273,9 +301,9 @@ function GameDetails({ gameId }: { gameId: string | undefined }) {
               event.preventDefault()
               document.getElementById(`module-${module.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
             }}
-            onDragOver={(event) => handleModuleDragOver(event, module.id)}
-            onDragLeave={handleModuleDragLeave}
-            onDrop={(event) => handleModuleDrop(event, module.id)}
+            onDragOver={isManaging ? (event) => handleModuleDragOver(event, module.id) : undefined}
+            onDragLeave={isManaging ? handleModuleDragLeave : undefined}
+            onDrop={isManaging ? (event) => handleModuleDrop(event, module.id) : undefined}
           >{module.name}</a>
         ))}
       </nav>
@@ -288,32 +316,43 @@ function GameDetails({ gameId }: { gameId: string | undefined }) {
 
           return (
             <section className={`module-section${dropTarget === module.id ? ' is-drop-target' : ''}`} id={`module-${module.id}`} key={module.id} aria-label={module.name}
-              onDragOver={(event) => handleModuleDragOver(event, module.id)}
-              onDragLeave={handleModuleDragLeave}
-              onDrop={(event) => handleModuleDrop(event, module.id)}>
+              onDragOver={isManaging ? (event) => handleModuleDragOver(event, module.id) : undefined}
+              onDragLeave={isManaging ? handleModuleDragLeave : undefined}
+              onDrop={isManaging ? (event) => handleModuleDrop(event, module.id) : undefined}>
               <header className="module-heading">
                 <div><span>{module.key}</span><h2>{module.name}</h2></div>
                 <div className="module-heading-actions">
                   <p>{moduleImages.length} 张</p>
-                  {editable && repository.updateModule && (
-                    <button type="button" disabled={busy} aria-label={`编辑 ${module.name}模块`} onClick={() => { if (!busyRef.current) setEditingModule(module) }}><Pencil size={14} /> 编辑</button>
+                  {canManage && (
+                    <button type="button" disabled={busy} aria-label={`编辑 ${module.name}模块`} onClick={() => startManaging(module)}>
+                      <Pencil size={14} /> {isManaging ? '修改模块' : '编辑'}
+                    </button>
                   )}
                 </div>
               </header>
+              {isManaging && editingModule?.id === module.id && repository.updateModule && (
+                <ModuleEditor
+                  module={editingModule}
+                  onClose={() => { if (!busyRef.current) setEditingModule(null) }}
+                  onSave={async (update) => {
+                    await mutate(() => repository.updateModule!(editingModule.id, update), () => setEditingModule(null), true)
+                  }}
+                />
+              )}
               {moduleImages.length ? (
                 <div className="image-grid">
                   {moduleImages.map((image) => <ImageCard key={image.id} image={image} onOpen={(item) => { if (!busyRef.current) setSelectedImage(item) }} busy={busy}
                     selected={selectedIds.includes(image.id)}
-                    onSelect={canDeleteImages ? (id, selected) => setSelectedIds((current) => selected ? [...new Set([...current, id])] : current.filter((item) => item !== id)) : undefined}
-                    onMove={canMove ? (item) => { if (busyRef.current) return; setMutationError(null); setMovingImage(item) } : undefined}
-                    onDragImage={(id) => {
+                    onSelect={isManaging && canDeleteImages ? (id, selected) => setSelectedIds((current) => selected ? [...new Set([...current, id])] : current.filter((item) => item !== id)) : undefined}
+                    onMove={isManaging && canMove ? (item) => { if (busyRef.current) return; setMutationError(null); setMovingImage(item) } : undefined}
+                    onDragImage={isManaging && canMove ? (id) => {
                       setDraggingId(id)
                       if (!id) { setDropTarget(null); setCardDropTarget(null) }
-                    }}
-                    dropSide={cardDropTarget?.imageId === image.id ? cardDropTarget.side : undefined}
-                    onDragOverCard={canMove ? (event) => handleCardDragOver(event, image, moduleImages) : undefined}
-                    onDragLeaveCard={canMove ? handleCardDragLeave : undefined}
-                    onDropCard={canMove ? (event) => handleCardDrop(event, image, moduleImages) : undefined} />)}
+                    } : undefined}
+                    dropSide={isManaging && cardDropTarget?.imageId === image.id ? cardDropTarget.side : undefined}
+                    onDragOverCard={isManaging && canMove ? (event) => handleCardDragOver(event, image, moduleImages) : undefined}
+                    onDragLeaveCard={isManaging && canMove ? handleCardDragLeave : undefined}
+                    onDropCard={isManaging && canMove ? (event) => handleCardDrop(event, image, moduleImages) : undefined} />)}
                 </div>
               ) : (
                 <div className="module-empty">这个模块还没有截图</div>
@@ -340,15 +379,6 @@ function GameDetails({ gameId }: { gameId: string | undefined }) {
             if (!gameImages.some((image) => image.id === imageId)) return
             await mutate(() => repository.updateImageMetadata!(imageId, update), () => setSelectedImage(null), true)
           } : undefined}
-        />
-      )}
-      {editingModule && editable && repository.updateModule && (
-        <ModuleEditor
-          module={editingModule}
-          onClose={() => { if (!busyRef.current) setEditingModule(null) }}
-          onSave={async (update) => {
-            await mutate(() => repository.updateModule!(editingModule.id, update), () => setEditingModule(null), true)
-          }}
         />
       )}
       {movingImage && <MoveImageDialog image={movingImage} modules={modules} images={gameImages} busy={busy} error={mutationError}

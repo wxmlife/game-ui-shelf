@@ -1,4 +1,4 @@
-import { LoaderCircle, X } from 'lucide-react'
+import { LoaderCircle } from 'lucide-react'
 import { type FormEvent, useState } from 'react'
 
 import type { ModuleUpdate } from '../data/libraryRepository'
@@ -30,26 +30,30 @@ export function ModuleEditor({ module, onClose, onSave }: ModuleEditorProps) {
   }
 
   return (
-    <div className="editor-backdrop" role="dialog" aria-modal="true" aria-label={`编辑 ${module.name}模块`}>
-      <form className="editor-card" onSubmit={(event) => void submit(event)}>
-        <button className="editor-close" type="button" aria-label="关闭模块编辑" onClick={onClose}><X size={18} /></button>
-        <p className="eyebrow">EDIT MODULE</p>
-        <h2>编辑模块</h2>
-        <p>修改后，模块下已有图片会继续保留。</p>
+    <section className="module-editor-inline" role="region" aria-label={`编辑 ${module.name}模块`}>
+      <div className="module-editor-copy">
+        <p className="eyebrow">MODULE SETTINGS</p>
+        <h3>修改「{module.name}」模块</h3>
+        <p>只修改模块资料，不会影响图片的选择、移动和顺序。</p>
+      </div>
+      <form className="module-editor-form" aria-label="编辑模块" onSubmit={(event) => void submit(event)}>
         <label>
           <span>模块标识</span>
-          <input aria-label="模块标识" value={key} onChange={(event) => setKey(event.target.value)} />
+          <input aria-label="模块标识" value={key} disabled={saving} onChange={(event) => setKey(event.target.value)} />
         </label>
         <label>
           <span>模块显示名称</span>
-          <input aria-label="模块显示名称" value={name} onChange={(event) => setName(event.target.value)} />
+          <input aria-label="模块显示名称" value={name} disabled={saving} onChange={(event) => setName(event.target.value)} />
         </label>
-        {error && <div className="editor-error" role="alert">{error}</div>}
-        <button className="primary-button" type="submit" disabled={saving || !key.trim() || !name.trim()}>
-          {saving && <LoaderCircle className="spin" size={16} />}
-          {saving ? '保存中…' : '保存模块'}
-        </button>
+        {error && <div className="editor-error module-editor-error" role="alert">{error}</div>}
+        <div className="module-editor-actions">
+          <button className="secondary-button" type="button" disabled={saving} onClick={onClose}>取消编辑</button>
+          <button className="primary-button" type="submit" disabled={saving || !key.trim() || !name.trim()}>
+            {saving && <LoaderCircle className="spin" size={16} />}
+            {saving ? '保存中…' : '保存模块'}
+          </button>
+        </div>
       </form>
-    </div>
+    </section>
   )
 }

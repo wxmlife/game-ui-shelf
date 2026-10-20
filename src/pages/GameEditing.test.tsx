@@ -48,6 +48,7 @@ function managementFixture() {
       snapshot.images = snapshot.images.filter((image) => !ids.includes(image.id))
       return { status: 'complete' as const }
     }),
+    updateModule: vi.fn(async () => ({ status: 'complete' as const })),
     deleteGame: vi.fn(async () => { snapshot.games = []; snapshot.images = []; return { status: 'complete' as const } }),
     moveImage: vi.fn(async () => ({ status: 'complete' as const })),
   }
@@ -64,7 +65,94 @@ function twoGameFixture() {
   return fixture
 }
 
+async function enterEditing(user = userEvent.setup(), moduleName = '源模块') {
+  await user.click(await screen.findByRole('button', { name: `编辑 ${moduleName}模块` }))
+}
+
 describe('game image management', () => {
+  it('starts in browsing mode with image management controls hidden', async () => {
+    const { repository } = managementFixture()
+    render(<App repository={repository} />)
+
+    expect(await screen.findByRole('button', { name: '查看 图片甲' })).toBeEnabled()
+    expect(screen.queryAllByRole('checkbox', { name: /选择 图片/ })).toHaveLength(0)
+    expect(screen.queryAllByRole('button', { name: /移动 .* 到模块或位置/ })).toHaveLength(0)
+    expect(screen.queryByRole('button', { name: '完成编辑' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('toolbar', { name: '图片批量管理' })).not.toBeInTheDocument()
+  })
+
+  it.each(['module', 'navigation', 'card'] as const)('rejects image drops on a %s while browsing', async (target) => {
+    const { repository, placeImage } = managementFixture()
+    render(<App repository={repository} />)
+    const targetModule = await screen.findByRole('region', { name: '目标模块' })
+    const dropTarget = target === 'module'
+      ? targetModule
+      : target === 'navigation'
+        ? within(screen.getByRole('navigation', { name: '模块目录' })).getByRole('link', { name: '目标模块' })
+        : screen.getByRole('button', { name: '查看 图片丙' }).closest('article')!
+    const dataTransfer = { types: ['application/x-ui-image'], getData: () => 'image-0', dropEffect: '' }
+    const dragOver = createEvent.dragOver(dropTarget, { dataTransfer })
+    fireEvent(dropTarget, dragOver)
+    expect(dragOver.defaultPrevented).toBe(false)
+    expect(dropTarget).not.toHaveClass('is-drop-target')
+    expect(dropTarget).not.toHaveClass('is-drop-before')
+    expect(dropTarget).not.toHaveClass('is-drop-after')
+
+    fireEvent.drop(dropTarget, { dataTransfer })
+
+    expect(placeImage).not.toHaveBeenCalled()
+  })
+
+  it('enters page editing from any module and keeps its editor inline with cross-module image controls', async () => {
+    const user = userEvent.setup()
+    const { repository } = managementFixture()
+    render(<App repository={repository} />)
+
+    await enterEditing(user, '目标模块')
+
+    expect(screen.getByRole('button', { name: '完成编辑' })).toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: '编辑 目标模块模块' })).not.toBeInTheDocument()
+    const targetModule = screen.getByRole('region', { name: '目标模块' })
+    expect(within(targetModule).getByLabelText('模块显示名称')).toHaveValue('目标模块')
+    expect(screen.getAllByRole('checkbox', { name: /选择 图片/ })).toHaveLength(3)
+    expect(screen.getAllByRole('button', { name: /移动 .* 到模块或位置/ })).toHaveLength(3)
+    await user.click(screen.getByRole('checkbox', { name: '选择 图片甲' }))
+    await user.click(screen.getByRole('checkbox', { name: '选择 图片丙' }))
+    expect(screen.getByRole('toolbar', { name: '图片批量管理' })).toHaveTextContent('已选 2 张')
+
+    await enterEditing(user)
+
+    expect(within(screen.getByRole('region', { name: '源模块' })).getByLabelText('模块显示名称')).toHaveValue('源模块')
+    expect(within(targetModule).queryByLabelText('模块显示名称')).not.toBeInTheDocument()
+    expect(screen.getByRole('toolbar', { name: '图片批量管理' })).toHaveTextContent('已选 2 张')
+  })
+
+  it('finishes editing by hiding controls and clearing selection, inline editor, and drag state', async () => {
+    const user = userEvent.setup()
+    const { repository, placeImage } = managementFixture()
+    render(<App repository={repository} />)
+    await enterEditing(user)
+    await user.click(screen.getByRole('checkbox', { name: '选择 图片甲' }))
+    const handle = screen.getByRole('button', { name: '移动 图片甲 到模块或位置' })
+    const targetModule = screen.getByRole('region', { name: '目标模块' })
+    const dataTransfer = { types: ['application/x-ui-image'], setData: vi.fn(), getData: () => '', effectAllowed: '', dropEffect: '' }
+    fireEvent.dragStart(handle, { dataTransfer })
+    fireEvent.dragOver(targetModule, { dataTransfer })
+    expect(targetModule).toHaveClass('is-drop-target')
+
+    await user.click(screen.getByRole('button', { name: '完成编辑' }))
+
+    expect(screen.queryAllByRole('checkbox')).toHaveLength(0)
+    expect(screen.queryAllByRole('button', { name: /移动 .* 到模块或位置/ })).toHaveLength(0)
+    expect(screen.queryByRole('toolbar', { name: '图片批量管理' })).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('模块显示名称')).not.toBeInTheDocument()
+    expect(targetModule).not.toHaveClass('is-drop-target')
+    fireEvent.drop(targetModule, { dataTransfer })
+    expect(placeImage).not.toHaveBeenCalled()
+    await enterEditing(user)
+    expect(screen.getByRole('checkbox', { name: '选择 图片甲' })).not.toBeChecked()
+  })
+
   it.each(['drag', 'dialog'] as const)('locks stale cards and metadata while a %s move is pending, then restores editing', async (method) => {
     const user = userEvent.setup()
     const { repository, snapshot } = managementFixture()
@@ -75,6 +163,7 @@ describe('game image management', () => {
     repository.updateModule = vi.fn(async () => ({ status: 'complete' as const }))
     repository.updateImageMetadata = vi.fn(async () => ({ status: 'complete' as const }))
     render(<App repository={repository} />)
+    await enterEditing(user)
     const handle = await screen.findByRole('button', { name: '移动 图片甲 到模块或位置' })
     if (method === 'dialog') {
       await user.click(handle)
@@ -107,6 +196,7 @@ describe('game image management', () => {
     let failSave!: (error: Error) => void
     repository.updateImageMetadata = vi.fn(() => new Promise<MutationResult>((_resolve, reject) => { failSave = reject }))
     render(<App repository={repository} />)
+    await enterEditing(user)
     await user.click(await screen.findByRole('button', { name: '查看 图片甲' }))
     await user.click(screen.getByRole('button', { name: '编辑图片资料' }))
     await user.click(screen.getByRole('button', { name: '保存图片资料' }))
@@ -119,19 +209,30 @@ describe('game image management', () => {
     expect(screen.getByRole('button', { name: '移动 图片甲 到模块或位置' })).toBeEnabled()
   })
 
-  it.each(['selection', 'deletion', 'move', 'viewer'] as const)('clears %s state when navigating directly to another game', async (state) => {
+  it.each(['selection', 'deletion', 'move', 'viewer', 'drag'] as const)('returns to browsing and clears %s state when navigating directly to another game', async (state) => {
     const user = userEvent.setup()
     const { repository } = twoGameFixture()
     render(<App repository={repository} />)
+    await enterEditing(user)
     await user.click(await screen.findByRole('checkbox', { name: '选择 图片甲' }))
     if (state === 'deletion') await user.click(screen.getByRole('button', { name: '删除已选' }))
     if (state === 'move') await user.click(screen.getByRole('button', { name: '移动 图片甲 到模块或位置' }))
     if (state === 'viewer') await user.click(screen.getByRole('button', { name: '查看 图片甲' }))
+    if (state === 'drag') {
+      const dataTransfer = { types: ['application/x-ui-image'], setData: vi.fn(), getData: () => 'image-0', effectAllowed: '', dropEffect: '' }
+      fireEvent.dragStart(screen.getByRole('button', { name: '移动 图片甲 到模块或位置' }), { dataTransfer })
+      fireEvent.dragOver(screen.getByRole('region', { name: '空模块' }), { dataTransfer })
+    }
     await act(async () => { window.location.hash = '#/game/game-b' })
     await screen.findByRole('heading', { name: '另一游戏' })
     expect(screen.queryByRole('toolbar', { name: '图片批量管理' })).not.toBeInTheDocument()
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
     expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '完成编辑' })).not.toBeInTheDocument()
+    expect(screen.queryAllByRole('checkbox')).toHaveLength(0)
+    expect(screen.queryAllByRole('button', { name: /移动 .* 到模块或位置/ })).toHaveLength(0)
+    expect(screen.queryByLabelText('模块显示名称')).not.toBeInTheDocument()
+    await enterEditing(user, '另一模块')
     await user.click(screen.getByRole('checkbox', { name: '选择 另一图片' }))
     await user.click(screen.getByRole('button', { name: '删除已选' }))
     await user.click(screen.getByRole('button', { name: '确认删除' }))
@@ -154,11 +255,13 @@ describe('game image management', () => {
       }
     })) })
     render(<App repository={repository} />)
+    await enterEditing(user)
     await user.click(await screen.findByRole('button', { name: '移动 图片甲 到模块或位置' }))
     await user.selectOptions(screen.getByRole('combobox', { name: '目标模块' }), 'module-2')
     await user.click(screen.getByRole('button', { name: '确认移动' }))
     await act(async () => { window.location.hash = '#/game/game-b' })
     await screen.findByRole('heading', { name: '另一游戏' })
+    await enterEditing(user, '另一模块')
     await user.click(screen.getByRole('button', { name: '移动 另一图片 到模块或位置' }))
     expect(screen.getByRole('dialog', { name: '移动到模块' })).toHaveTextContent('另一图片')
     await act(async () => finish())
@@ -194,12 +297,14 @@ describe('game image management', () => {
       }
     }))
     render(<App repository={repository} />)
+    await enterEditing(user)
     await user.click(await screen.findByRole('checkbox', { name: '选择 图片甲' }))
     await user.click(screen.getByRole('button', { name: '删除已选' }))
     await user.click(screen.getByRole('button', { name: '确认删除' }))
 
     await act(async () => { window.location.hash = '#/game/game-b' })
     await screen.findByRole('heading', { name: '另一游戏' })
+    await enterEditing(user, '另一模块')
     await user.click(screen.getByRole('button', { name: '移动 另一图片 到模块或位置' }))
     expect(screen.getByRole('dialog', { name: '移动到模块' })).toHaveTextContent('另一图片')
 
@@ -234,6 +339,7 @@ describe('game image management', () => {
     await user.click(screen.getByRole('button', { name: '保存图片资料' }))
 
     await act(async () => { window.location.hash = '#/game/game-b' })
+    await enterEditing(user, '另一模块')
     await user.click(await screen.findByRole('checkbox', { name: '选择 另一图片' }))
     expect(screen.getByRole('toolbar', { name: '图片批量管理' })).toHaveTextContent('已选 1 张')
 
@@ -294,6 +400,7 @@ describe('game image management', () => {
     const user = userEvent.setup()
     const { repository } = managementFixture()
     render(<App repository={repository} />)
+    await enterEditing(user)
     await user.click(await screen.findByRole('checkbox', { name: '选择 图片甲' }))
     await user.click(screen.getByRole('button', { name: '取消选择' }))
     expect(screen.getByRole('checkbox', { name: '选择 图片甲' })).not.toBeChecked()
@@ -314,12 +421,13 @@ describe('game image management', () => {
     const { repository, snapshot, placeImage } = managementFixture()
     snapshot.images.push({ ...snapshot.images[2], id: 'image-3', title: '图片丁', sequenceOrder: 4 })
     render(<App repository={repository} />)
+    await enterEditing(user)
     const handle = await screen.findByRole('button', { name: '移动 图片甲 到模块或位置' })
     handle.focus()
     await user.keyboard('{Enter}')
     expect(screen.getByRole('dialog', { name: '移动到模块' })).toBeInTheDocument()
     await user.keyboard('{Escape}')
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: '移动到模块' })).not.toBeInTheDocument()
     expect(handle).toHaveFocus()
     await user.click(handle)
     expect(screen.getByRole('combobox', { name: '目标模块' })).toHaveValue('module-0')
@@ -340,6 +448,7 @@ describe('game image management', () => {
     const { repository, snapshot, placeImage } = managementFixture()
     snapshot.images = [snapshot.images[0]]
     render(<App repository={repository} />)
+    await enterEditing()
     const handle = await screen.findByRole('button', { name: '移动 图片甲 到模块或位置' })
     expect(handle).toHaveAttribute('draggable', 'true')
     expect(screen.getByRole('button', { name: '查看 图片甲' })).not.toHaveAttribute('draggable', 'true')
@@ -355,6 +464,7 @@ describe('game image management', () => {
   it('reorders within a module by dropping on the left half of a card', async () => {
     const { repository, placeImage } = managementFixture()
     render(<App repository={repository} />)
+    await enterEditing()
     const handle = await screen.findByRole('button', { name: '移动 图片乙 到模块或位置' })
     const targetCard = screen.getByRole('button', { name: '查看 图片甲' }).closest('article')!
     Object.defineProperty(targetCard, 'getBoundingClientRect', { configurable: true, value: () => ({ left: 100, width: 200 }) })
@@ -380,6 +490,7 @@ describe('game image management', () => {
     const { repository, snapshot, placeImage } = managementFixture()
     snapshot.images.push({ ...snapshot.images[2], id: 'image-3', title: '图片丁', sequenceOrder: 4 })
     render(<App repository={repository} />)
+    await enterEditing()
     const handle = await screen.findByRole('button', { name: '移动 图片甲 到模块或位置' })
     const targetCard = screen.getByRole('button', { name: '查看 图片丙' }).closest('article')!
     Object.defineProperty(targetCard, 'getBoundingClientRect', { configurable: true, value: () => ({ left: 100, width: 200 }) })
@@ -410,6 +521,7 @@ describe('game image management', () => {
     const originalTitle = snapshot.images[0].title
     const originalTags = [...snapshot.images[0].tags]
     render(<App repository={repository} />)
+    await enterEditing()
 
     const moduleNav = await screen.findByRole('navigation', { name: '模块目录' })
     const targetChip = within(moduleNav).getByRole('link', { name: '空模块' })
@@ -448,6 +560,7 @@ describe('game image management', () => {
   it('prefers the transfer payload over stale React drag state', async () => {
     const { repository, placeImage } = managementFixture()
     render(<App repository={repository} />)
+    await enterEditing()
 
     const staleHandle = await screen.findByRole('button', { name: '移动 图片甲 到模块或位置' })
     fireEvent.dragStart(staleHandle, {
@@ -507,6 +620,7 @@ describe('game image management', () => {
     let rejectDelete!: (error: Error) => void
     repository.deleteImages = vi.fn(() => new Promise<MutationResult>((_resolve, reject) => { rejectDelete = reject }))
     render(<App repository={repository} />)
+    await enterEditing(user)
     await user.click(await screen.findByRole('checkbox', { name: '选择 图片甲' }))
     await user.click(screen.getByRole('button', { name: '删除已选' }))
     await user.dblClick(screen.getByRole('button', { name: '确认删除' }))
@@ -531,6 +645,7 @@ describe('game image management', () => {
       return { status: 'partial' as const, pendingCleanup: 2, message: '还有 2 个文件等待清理' }
     })
     render(<App repository={repository} />)
+    await enterEditing(user)
     await user.click(await screen.findByRole('checkbox', { name: '选择 图片甲' }))
     await user.click(screen.getByRole('button', { name: '删除已选' }))
     await user.click(screen.getByRole('button', { name: '确认删除' }))
@@ -573,6 +688,8 @@ describe('cloud metadata editing', () => {
     render(<App repository={repository} />)
 
     await user.click(await screen.findByRole('button', { name: '编辑 奖励模块' }))
+    expect(screen.queryByRole('dialog', { name: '编辑 奖励模块' })).not.toBeInTheDocument()
+    expect(within(screen.getByRole('region', { name: '奖励' })).getByLabelText('模块显示名称')).toHaveValue('奖励')
     const moduleName = screen.getByLabelText('模块显示名称')
     await user.clear(moduleName)
     await user.type(moduleName, '奖励与邮件')

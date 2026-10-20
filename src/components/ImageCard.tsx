@@ -36,7 +36,7 @@ export function ImageCard({
           onDragEnd={() => onDragImage?.(null)}><GripVertical size={16} /> 移动</button>}
       </div>}
       <button type="button" className="image-card-preview" disabled={busy} onClick={() => onOpen(image)} aria-label={`查看 ${image.title}`}>
-        <img src={image.thumbnailUrl} alt="" loading="lazy" draggable={false} />
+        <img src={image.thumbnailUrl} alt="" width={image.width} height={image.height} style={{ objectFit: 'contain' }} loading="lazy" draggable={false} />
         <span className="image-card-zoom"><Maximize2 size={17} /> 查看大图</span>
         <span className="sequence-index">{String(image.sequenceOrder).padStart(2, '0')}</span>
       </button>
